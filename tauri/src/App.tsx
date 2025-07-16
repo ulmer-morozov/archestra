@@ -16,6 +16,10 @@ function App() {
   const [chatMessage, setChatMessage] = useState("");
   const [chatHistory, setChatHistory] = useState<{role: string, content: string}[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
+  const [mcpServerPackage, setMcpServerPackage] = useState("@modelcontextprotocol/server-github");
+  const [mcpServerArgs, setMcpServerArgs] = useState("");
+  const [mcpServerStatus, setMcpServerStatus] = useState("");
+  const [mcpServerLoading, setMcpServerLoading] = useState(false);
 
   // Fetch the port from Rust on mount
   useEffect(() => {
@@ -52,13 +56,13 @@ function App() {
     try {
       setOllamaStatus("Starting Ollama server...");
       console.log("Attempting to start Ollama sidecar...");
-      
+
       const command = Command.sidecar('binaries/ollama-darwin/ollama', ['serve']);
       console.log("Command created, executing...");
-      
+
       const output = await command.execute();
       console.log("Command executed, output:", output);
-      
+
       if (output.code === 0) {
         setOllamaStatus(`Ollama server started successfully. stdout: ${output.stdout}`);
       } else {
@@ -73,12 +77,12 @@ function App() {
 
   async function sendChatMessage() {
     if (!chatMessage.trim()) return;
-    
+
     setChatLoading(true);
     const userMessage = { role: "user", content: chatMessage };
     setChatHistory(prev => [...prev, userMessage]);
     setChatMessage("");
-    
+
     try {
       const response = await fetch('http://localhost:11434/api/generate', {
         method: 'POST',
@@ -89,9 +93,9 @@ function App() {
           stream: false
         })
       });
-      
+
       const data = await response.json();
-      
+
       if (response.ok) {
         const aiMessage = { role: "assistant", content: data.response };
         setChatHistory(prev => [...prev, aiMessage]);
@@ -104,8 +108,30 @@ function App() {
       const errorMessage = { role: "error", content: `Error: ${errorMsg}` };
       setChatHistory(prev => [...prev, errorMessage]);
     }
-    
+
     setChatLoading(false);
+  }
+
+  async function runMcpServer() {
+    setMcpServerLoading(true);
+    setMcpServerStatus("Starting MCP server in sandbox...");
+
+    try {
+      const args = mcpServerArgs.trim() ? mcpServerArgs.split(' ').filter(arg => arg.trim()) : [];
+      const result = await invoke("run_mcp_server_in_sandbox", {
+        config: {
+          package_name: mcpServerPackage,
+          args: args
+        }
+      });
+
+      setMcpServerStatus(`MCP server result: ${result}`);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'An unknown error occurred';
+      setMcpServerStatus(`Error running MCP server: ${errorMsg}`);
+    }
+
+    setMcpServerLoading(false);
   }
 
   return (
@@ -145,14 +171,14 @@ function App() {
       <p>hello-server port: {sidecarPort ?? 'loading...'}</p>
       <p>node.js server response: {greetingMessage}</p>
       <p>node.js server error: {greetingMessageError}</p>
-      
+
       <div className="row">
         <button onClick={runOllamaServe}>
           Start Ollama Server
         </button>
       </div>
       <p>Ollama status: {ollamaStatus}</p>
-      
+
       <div className="chat-section">
         <h3>Chat with Ollama</h3>
         <div className="chat-history" style={{border: '1px solid #ccc', padding: '10px', height: '200px', overflowY: 'scroll', marginBottom: '10px'}}>
@@ -178,9 +204,37 @@ function App() {
           <button type="submit" disabled={chatLoading || !chatMessage.trim()}>
             {chatLoading ? "Sending..." : "Send"}
           </button>
-        </form>
+                </form>
       </div>
-      
+
+      <div className="mcp-server-section">
+        <h3>Run MCP Server in Sandbox</h3>
+        <div className="row">
+          <input
+            value={mcpServerPackage}
+            onChange={(e) => setMcpServerPackage(e.target.value)}
+            placeholder="MCP Server Package (e.g., @modelcontextprotocol/server-github)"
+            style={{flex: 1, marginRight: '10px'}}
+          />
+          <input
+            value={mcpServerArgs}
+            onChange={(e) => setMcpServerArgs(e.target.value)}
+            placeholder="Optional arguments (space-separated)"
+            style={{flex: 1}}
+          />
+        </div>
+        <div className="row" style={{marginTop: '10px'}}>
+          <button
+            onClick={runMcpServer}
+            disabled={mcpServerLoading || !mcpServerPackage.trim()}
+            style={{flex: 1}}
+          >
+            {mcpServerLoading ? "Running..." : "Run MCP Server"}
+          </button>
+        </div>
+        <p>MCP Server Status: {mcpServerStatus}</p>
+      </div>
+
     </main>
   );
 }
