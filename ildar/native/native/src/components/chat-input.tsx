@@ -15,6 +15,7 @@ import {
   AIInputModelSelectValue,
 } from "@/components/kibo/ai-input";
 import { PaperclipIcon, MicIcon } from "lucide-react";
+import { NoModelFound } from "./no-model-found";
 
 interface SimpleChatInputProps {
   onSubmit: (message: string) => Promise<void>;
@@ -46,50 +47,32 @@ export function ChatInput({ onSubmit, disabled = false }: SimpleChatInputProps) 
   const [modelsError, setModelsError] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string>("");
 
-  // Fetch available Ollama models
-  useEffect(() => {
-    const fetchModels = async () => {
-      try {
-        setModelsLoading(true);
-        setModelsError(null);
+  const fetchModels = async () => {
+    try {
+      setModelsLoading(true);
+      setModelsError(null);
 
-        const response = await fetch("http://localhost:11434/api/tags");
+      const response = await fetch("http://localhost:11434/api/tags");
 
-        if (!response.ok) {
-          throw new Error(`Failed to fetch models: ${response.status}`);
-        }
-
-        const data: OllamaResponse = await response.json();
-        setModels(data.models);
-
-        // Set the first model as default if available
-        if (data.models.length > 0 && !selectedModel) {
-          setSelectedModel(data.models[0].name);
-        }
-      } catch (error) {
-        console.error("Error fetching Ollama models:", error);
-        setModelsError("Failed to fetch local models. Make sure Ollama is running.");
-        // Fallback to some default models
-        setModels([
-          {
-            name: "llama3.2",
-            modified_at: "",
-            size: 0,
-            digest: "",
-            details: {
-              format: "gguf",
-              family: "llama",
-              parameter_size: "3B",
-              quantization_level: "Q4_0",
-            },
-          },
-        ]);
-        setSelectedModel("llama3.2");
-      } finally {
-        setModelsLoading(false);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch models: ${response.status}`);
       }
-    };
 
+      const data: OllamaResponse = await response.json();
+      setModels(data.models);
+      if (data.models.length > 0 && !selectedModel) {
+        setSelectedModel(data.models[0].name);
+      }
+    } catch (error) {
+      console.error("Error fetching Ollama models:", error);
+      setModelsError("Failed to fetch local models. Make sure Ollama is running.");
+      setModels([]);
+    } finally {
+      setModelsLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchModels();
   }, [selectedModel]);
 
@@ -117,6 +100,17 @@ export function ChatInput({ onSubmit, disabled = false }: SimpleChatInputProps) 
     const paramSize = model.details.parameter_size;
     return paramSize ? `${name} (${paramSize})` : name;
   };
+
+  if (modelsError || (!modelsLoading && models.length === 0)) {
+    return (
+      <div className="m-3">
+        <NoModelFound
+          error={modelsError || "No models found. Please ensure Ollama is running and has models installed."}
+          onRetry={fetchModels}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="m-3">
