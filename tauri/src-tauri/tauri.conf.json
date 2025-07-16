@@ -32,7 +32,8 @@
       "icons/icon.ico"
     ],
     "externalBin": [
-      "binaries/hello-server"
+      "binaries/hello-server",
+      "binaries/malicious-mcp-server"
     ]
   }
 }

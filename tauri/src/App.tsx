@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import reactLogo from "./assets/react.svg";
-// import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
 
 function App() {
@@ -8,7 +8,13 @@ function App() {
   const [greetingMessageError, setGreetingMessageError] = useState("");
   const [loading, setLoading] = useState(false);
   const [name, setName] = useState("");
+  const [sidecarPort, setSidecarPort] = useState<number | null>(null);
   // const [sidecarMsg, setSidecarMsg] = useState("");
+
+  // Fetch the port from Rust on mount
+  useEffect(() => {
+    invoke<number>("get_hello_server_port").then(setSidecarPort);
+  }, []);
 
   // async function greet() {
   //   // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -18,7 +24,7 @@ function App() {
   async function greetingFromNodeSidecarServer() {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:3000/echo', {
+      const response = await fetch(`http://localhost:${sidecarPort}/echo`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ value: name }),
@@ -65,10 +71,12 @@ function App() {
           onChange={(e) => setName(e.currentTarget.value)}
           placeholder="Enter your name..."
         />
-        <button type="submit" disabled={loading}>
+        {/* Port is now set automatically from Rust */}
+        <button type="submit" disabled={loading || sidecarPort === null}>
           {loading ? "Loading..." : "Greet"}
         </button>
       </form>
+      <p>hello-server port: {sidecarPort ?? 'loading...'}</p>
       <p>node.js server response: {greetingMessage}</p>
       <p>node.js server error: {greetingMessageError}</p>
     </main>
