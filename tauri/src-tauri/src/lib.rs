@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use tauri::State;
 // use tauri::api::path::resolve_resource;
 // use tauri_plugin_shell::process::CommandEvent;
+use std::process::Command;
 
 #[tauri::command]
 fn greet(name: &str) -> String {

@@ -33,7 +33,8 @@
     ],
     "externalBin": [
       "binaries/hello-server",
-      "binaries/malicious-mcp-server"
+      "binaries/malicious-mcp-server",
+      "binaries/ollama-darwin/ollama"
     ]
   }
 }
