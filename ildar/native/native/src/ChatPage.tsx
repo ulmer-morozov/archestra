@@ -1,14 +1,19 @@
 import { useState, useRef, useEffect } from "react";
 
-import { AIResponse } from "./components/kibo/ai-response";
 import { ChatInput } from "./components/chat-input";
+import { AIResponse } from "./components/kibo/ai-response";
+import { AIReasoning, AIReasoningTrigger, AIReasoningContent } from "./components/kibo/ai-reasoning";
+
+import { cn } from "@/lib/utils";
 
 interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  thinkingContent?: string;
   timestamp: Date;
   isStreaming?: boolean;
+  isThinkingStreaming?: boolean;
 }
 
 function ChatPage() {
@@ -24,7 +29,7 @@ function ChatPage() {
     scrollToBottom();
   }, [messages]);
 
-  const sendMessage = async (userMessage: string) => {
+  const sendMessage = async (userMessage: string, model: string) => {
     if (!userMessage.trim()) return;
 
     const userMsgId = Date.now().toString();
@@ -57,7 +62,7 @@ function ChatPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "llama3",
+          model,
           prompt: userMessage,
           stream: true,
         }),
@@ -90,15 +95,65 @@ function ChatPage() {
             if (data.response) {
               accumulatedContent += data.response;
 
+              const parseContent = (content: string) => {
+                const thinkStartMatch = content.match(/<think>/);
+                const thinkEndMatch = content.match(/<\/think>/);
+
+                if (thinkStartMatch && thinkEndMatch) {
+                  const thinkStart = thinkStartMatch.index!;
+                  const thinkEnd = thinkEndMatch.index!;
+
+                  const beforeThink = content.substring(0, thinkStart);
+                  const thinkingContent = content.substring(thinkStart + 7, thinkEnd);
+                  const afterThink = content.substring(thinkEnd + 8);
+
+                  return {
+                    thinking: thinkingContent,
+                    response: beforeThink + afterThink,
+                    isThinkingStreaming: false,
+                  };
+                } else if (thinkStartMatch && !thinkEndMatch) {
+                  const thinkStart = thinkStartMatch.index!;
+                  const beforeThink = content.substring(0, thinkStart);
+                  const thinkingContent = content.substring(thinkStart + 7);
+
+                  return {
+                    thinking: thinkingContent,
+                    response: beforeThink,
+                    isThinkingStreaming: true,
+                  };
+                } else {
+                  return {
+                    thinking: "",
+                    response: content,
+                    isThinkingStreaming: false,
+                  };
+                }
+              };
+
+              const parsed = parseContent(accumulatedContent);
+
               setMessages((prev) =>
                 prev.map((msg) =>
-                  msg.id === aiMsgId ? { ...msg, content: accumulatedContent, isStreaming: !data.done } : msg
+                  msg.id === aiMsgId
+                    ? {
+                        ...msg,
+                        content: parsed.response,
+                        thinkingContent: parsed.thinking,
+                        isStreaming: !data.done,
+                        isThinkingStreaming: parsed.isThinkingStreaming && !data.done,
+                      }
+                    : msg
                 )
               );
             }
 
             if (data.done) {
-              setMessages((prev) => prev.map((msg) => (msg.id === aiMsgId ? { ...msg, isStreaming: false } : msg)));
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === aiMsgId ? { ...msg, isStreaming: false, isThinkingStreaming: false } : msg
+                )
+              );
               break;
             }
           } catch (parseError) {
@@ -122,6 +177,10 @@ function ChatPage() {
     }
   };
 
+  const resetMessages = () => {
+    setMessages([]);
+  };
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-auto p-4 space-y-4">
@@ -133,21 +192,28 @@ function ChatPage() {
           messages.map((message) => (
             <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
               <div
-                className={`max-w-[80%] rounded-lg p-4 ${
+                className={cn(
+                  "max-w-[80%] rounded-lg p-4",
                   message.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"
-                }`}
+                )}
               >
                 {message.role === "user" ? (
                   <p className="whitespace-pre-wrap">{message.content}</p>
                 ) : (
                   <div className="relative">
+                    {message.thinkingContent && (
+                      <AIReasoning isStreaming={message.isThinkingStreaming} className="mb-4">
+                        <AIReasoningTrigger />
+                        <AIReasoningContent>{message.thinkingContent}</AIReasoningContent>
+                      </AIReasoning>
+                    )}
                     <AIResponse>{message.content}</AIResponse>
                     {message.isStreaming && (
                       <div className="flex justify-start">
-                        <div className="max-w-[80%] rounded-lg p-4 bg-muted">
+                        <div className="max-w-[80%] rounded-lg py-1 bg-muted">
                           <div className="flex items-center space-x-2">
                             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
-                            <p className="text-muted-foreground">Thinking...</p>
+                            <p className="text-muted-foreground">Loading...</p>
                           </div>
                         </div>
                       </div>
@@ -161,7 +227,7 @@ function ChatPage() {
         <div ref={messagesEndRef} />
       </div>
       <div className="p-4 min-h-min max-h-min">
-        <ChatInput onSubmit={sendMessage} disabled={isLoading} />
+        <ChatInput onSubmit={sendMessage} onModelChange={resetMessages} disabled={isLoading} />
       </div>
     </div>
   );

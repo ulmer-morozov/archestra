@@ -18,7 +18,8 @@ import { PaperclipIcon, MicIcon } from "lucide-react";
 import { NoModelFound } from "./no-model-found";
 
 interface SimpleChatInputProps {
-  onSubmit: (message: string) => Promise<void>;
+  onSubmit: (message: string, model: string) => Promise<void>;
+  onModelChange?: () => void;
   disabled?: boolean;
 }
 
@@ -39,7 +40,7 @@ interface OllamaResponse {
   models: OllamaModel[];
 }
 
-export function ChatInput({ onSubmit, disabled = false }: SimpleChatInputProps) {
+export function ChatInput({ onSubmit, onModelChange, disabled = false }: SimpleChatInputProps) {
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState<"submitted" | "streaming" | "ready" | "error">("ready");
   const [models, setModels] = useState<OllamaModel[]>([]);
@@ -81,14 +82,14 @@ export function ChatInput({ onSubmit, disabled = false }: SimpleChatInputProps) 
       e.preventDefault();
     }
 
-    if (!message.trim() || disabled) {
+    if (!message.trim() || disabled || !selectedModel) {
       return;
     }
 
     setStatus("submitted");
 
     try {
-      await onSubmit(message.trim());
+      await onSubmit(message.trim(), selectedModel);
       setMessage("");
       setStatus("ready");
     } catch (error) {
@@ -115,6 +116,11 @@ export function ChatInput({ onSubmit, disabled = false }: SimpleChatInputProps) 
         handleSubmit();
       }
     }
+  };
+
+  const handleModelChange = (modelName: string) => {
+    setSelectedModel(modelName);
+    onModelChange?.();
   };
 
   const formatModelDisplayName = (model: OllamaModel) => {
@@ -150,7 +156,7 @@ export function ChatInput({ onSubmit, disabled = false }: SimpleChatInputProps) 
           <AIInputTools>
             <AIInputModelSelect
               value={selectedModel}
-              onValueChange={setSelectedModel}
+              onValueChange={handleModelChange}
               disabled={modelsLoading || modelsError !== null}
             >
               <AIInputModelSelectTrigger>
