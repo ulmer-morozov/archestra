@@ -1,0 +1,60 @@
+{
+  "models": [
+    {
+      "id": "o1",
+      "provider": "OpenAI",
+      "providerId": "openai",
+      "name": "o1",
+      "multiModal": true
+    },
+    {
+      "id": "o3-mini",
+      "provider": "OpenAI",
+      "providerId": "openai",
+      "name": "o3 mini",
+      "multiModal": false
+    },
+    {
+      "id": "gpt-4.5-preview",
+      "provider": "OpenAI",
+      "providerId": "openai",
+      "name": "GPT-4.5",
+      "multiModal": true
+    },
+    {
+      "id": "gpt-4o",
+      "provider": "OpenAI",
+      "providerId": "openai",
+      "name": "GPT-4o",
+      "multiModal": true
+    },
+    {
+      "id": "gpt-4o-mini",
+      "provider": "OpenAI",
+      "providerId": "openai",
+      "name": "GPT-4o Mini",
+      "multiModal": true
+    },
+    {
+      "id": "claude-3-7-sonnet-latest",
+      "provider": "Anthropic",
+      "providerId": "anthropic",
+      "name": "Claude 3.7 Sonnet",
+      "multiModal": true
+    },
+    {
+      "id": "claude-3-5-sonnet-latest",
+      "provider": "Anthropic",
+      "providerId": "anthropic",
+      "name": "Claude 3.5 Sonnet",
+      "multiModal": true
+    },
+    {
+      "id": "claude-3-5-haiku-latest",
+      "provider": "Anthropic",
+      "providerId": "anthropic",
+      "name": "Claude 3.5 Haiku",
+      "multiModal": true
+    }
+  ]
+}
