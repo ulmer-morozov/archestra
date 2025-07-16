@@ -1,15 +1,167 @@
+import { useState, useRef, useEffect } from "react";
+
+import { AIResponse } from "./components/kibo/ai-response";
 import { ChatInput } from "./components/chat-input";
 
+interface Message {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  timestamp: Date;
+  isStreaming?: boolean;
+}
+
 function ChatPage() {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const sendMessage = async (userMessage: string) => {
+    if (!userMessage.trim()) return;
+
+    const userMsgId = Date.now().toString();
+    const newUserMessage: Message = {
+      id: userMsgId,
+      role: "user",
+      content: userMessage,
+      timestamp: new Date(),
+    };
+
+    setMessages((prev) => [...prev, newUserMessage]);
+    setIsLoading(true);
+
+    const aiMsgId = (Date.now() + 1).toString();
+    const aiMessage: Message = {
+      id: aiMsgId,
+      role: "assistant",
+      content: "",
+      timestamp: new Date(),
+      isStreaming: true,
+    };
+
+    setMessages((prev) => [...prev, aiMessage]);
+    setIsLoading(false);
+
+    try {
+      const response = await fetch("http://localhost:11434/api/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "llama3",
+          prompt: userMessage,
+          stream: true,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("No response body");
+      }
+
+      const decoder = new TextDecoder();
+      let accumulatedContent = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split("\n").filter((line) => line.trim());
+
+        for (const line of lines) {
+          try {
+            const data = JSON.parse(line);
+
+            if (data.response) {
+              accumulatedContent += data.response;
+
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === aiMsgId ? { ...msg, content: accumulatedContent, isStreaming: !data.done } : msg
+                )
+              );
+            }
+
+            if (data.done) {
+              setMessages((prev) => prev.map((msg) => (msg.id === aiMsgId ? { ...msg, isStreaming: false } : msg)));
+              break;
+            }
+          } catch (parseError) {
+            console.warn("Failed to parse chunk:", line);
+          }
+        }
+      }
+    } catch (error) {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === aiMsgId
+            ? {
+                ...msg,
+                content:
+                  "Sorry, I couldn't connect to the local LLM. Please make sure ollama is running on port 11434.",
+                isStreaming: false,
+              }
+            : msg
+        )
+      );
+    }
+  };
+
   return (
     <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-auto p-4 space-y-2">
-          {[...Array(40)].map(() => (
-            <div className="bg-muted/50 h-10 rounded-xl" />
-          ))}
+      <div className="flex-1 overflow-auto p-4 space-y-4">
+        {messages.length === 0 ? (
+          <div className="flex items-center justify-center h-full text-muted-foreground">
+            <p>Start a conversation with your local llama3 model</p>
+          </div>
+        ) : (
+          messages.map((message) => (
+            <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div
+                className={`max-w-[80%] rounded-lg p-4 ${
+                  message.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted"
+                }`}
+              >
+                {message.role === "user" ? (
+                  <p className="whitespace-pre-wrap">{message.content}</p>
+                ) : (
+                  <div className="relative">
+                    <AIResponse>{message.content}</AIResponse>
+                    {message.isStreaming && (
+                      <div className="flex justify-start">
+                        <div className="max-w-[80%] rounded-lg p-4 bg-muted">
+                          <div className="flex items-center space-x-2">
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+                            <p className="text-muted-foreground">Thinking...</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+        <div ref={messagesEndRef} />
       </div>
       <div className="p-4 min-h-min max-h-min">
-        <ChatInput />
+        <ChatInput onSubmit={sendMessage} disabled={isLoading} />
       </div>
     </div>
   );
