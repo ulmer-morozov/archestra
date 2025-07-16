@@ -76,8 +76,10 @@ export function ChatInput({ onSubmit, disabled = false }: SimpleChatInputProps) 
     fetchModels();
   }, [selectedModel]);
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: React.FormEvent<HTMLFormElement>) => {
+    if (e) {
+      e.preventDefault();
+    }
 
     if (!message.trim() || disabled) {
       return;
@@ -92,6 +94,26 @@ export function ChatInput({ onSubmit, disabled = false }: SimpleChatInputProps) 
     } catch (error) {
       setStatus("error");
       setTimeout(() => setStatus("ready"), 2000);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter") {
+      if (e.metaKey || e.ctrlKey) {
+        e.preventDefault();
+        const textarea = e.currentTarget;
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const newMessage = message.substring(0, start) + "\n" + message.substring(end);
+        setMessage(newMessage);
+
+        setTimeout(() => {
+          textarea.setSelectionRange(start + 1, start + 1);
+        }, 0);
+      } else {
+        e.preventDefault();
+        handleSubmit();
+      }
     }
   };
 
@@ -118,6 +140,7 @@ export function ChatInput({ onSubmit, disabled = false }: SimpleChatInputProps) 
         <AIInputTextarea
           value={message}
           onChange={(e) => setMessage(e.target.value)}
+          onKeyDown={handleKeyDown}
           placeholder="What would you like to know?"
           disabled={disabled}
           minHeight={48}
