@@ -29,7 +29,19 @@ function App() {
   const [activeSection, setActiveSection] = useState<"none" | "import" | "add">(
     "none",
   );
-
+  const [mcpTools, setMcpTools] = useState<
+    Array<{
+      serverName: string;
+      tool: {
+        name: string;
+        description?: string;
+        input_schema: any;
+      };
+    }>
+  >([]);
+  const [mcpServerStatuses, setMcpServerStatuses] = useState<{
+    [key: string]: boolean;
+  }>({});
   const serverListRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -42,11 +54,60 @@ function App() {
         [key: string]: { command: string; args: string[] };
       }>("load_mcp_servers");
       setMcpServers(servers);
+
+      // Also load MCP tools and server statuses
+      await loadMcpTools();
+      await loadMcpServerStatuses();
     } catch (error) {
       console.error("Failed to load MCP servers:", error);
     }
   }
 
+  async function loadMcpTools() {
+    try {
+      const tools = await invoke<
+        Array<
+          [
+            string,
+            {
+              name: string;
+              description?: string;
+              input_schema: any;
+            },
+          ]
+        >
+      >("get_mcp_tools");
+
+      const formattedTools = tools.map(([serverName, tool]) => ({
+        serverName,
+        tool,
+      }));
+      setMcpTools(formattedTools);
+    } catch (error) {
+      console.error("Failed to load MCP tools:", error);
+    }
+  }
+
+  async function loadMcpServerStatuses() {
+    try {
+      const statuses = await invoke<{
+        [key: string]: boolean;
+      }>("get_mcp_server_status");
+      setMcpServerStatuses(statuses);
+    } catch (error) {
+      console.error("Failed to load MCP server statuses:", error);
+    }
+  }
+
+  async function debugMcpBridge() {
+    try {
+      const debugInfo = await invoke<string>("debug_mcp_bridge");
+      console.log("MCP Bridge Debug:", debugInfo);
+      alert(debugInfo);
+    } catch (error) {
+      console.error("Failed to debug MCP bridge:", error);
+    }
+  }
 
   async function runOllamaServe() {
     console.log("runOllamaServe called, isOllamaRunning:", isOllamaRunning);
@@ -123,37 +184,95 @@ function App() {
     setChatMessage("");
 
     try {
-      const response = await fetch(`http://localhost:${ollamaPort}/api/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      // Check if the model supports tool calling
+      const modelSupportsTools = selectedModel && (
+        selectedModel.includes("functionary") || 
+        selectedModel.includes("mistral") ||
+        selectedModel.includes("command") ||
+        selectedModel.includes("qwen") ||
+        selectedModel.includes("hermes")
+      );
+
+      if (mcpTools.length > 0 && modelSupportsTools) {
+        // Use the enhanced tool-enabled chat
+        const messages = [
+          { role: "user", content: currentMessage, tool_calls: null },
+        ];
+
+        const response = await invoke<any>("ollama_chat_with_tools", {
+          port: ollamaPort,
           model: selectedModel,
-          prompt: currentMessage,
-          stream: false,
-        }),
-      });
+          messages: messages,
+        });
 
-      const responseText = await response.text();
-      console.log("Raw response:", responseText);
+        console.log("Tool-enabled response:", response);
 
-      let data;
-      try {
-        data = JSON.parse(responseText);
-        console.log("Parsed response:", data);
-      } catch (parseError) {
-        console.error("Failed to parse response:", parseError);
-        throw new Error(`Failed to parse response: ${responseText}`);
-      }
+        if (response.tool_results && response.tool_results.length > 0) {
+          // Add tool execution results to chat history
+          for (const toolResult of response.tool_results) {
+            const toolMessage = {
+              role: "tool",
+              content: `Tool executed: ${toolResult.content}`,
+            };
+            setChatHistory((prev) => [...prev, toolMessage]);
+          }
+        }
 
-      if (response.ok) {
-        const aiMessage = { role: "assistant", content: data.response };
-        setChatHistory((prev) => [...prev, aiMessage]);
+        if (response.message && response.message.content) {
+          const aiMessage = {
+            role: "assistant",
+            content: response.message.content,
+          };
+          setChatHistory((prev) => [...prev, aiMessage]);
+        }
       } else {
-        const errorMessage = {
-          role: "error",
-          content: `Error: ${response.status} - ${response.statusText} - ${JSON.stringify(data)}`,
-        };
-        setChatHistory((prev) => [...prev, errorMessage]);
+        // Add warning if tools are available but model doesn't support them
+        if (mcpTools.length > 0 && !modelSupportsTools) {
+          const warningMessage = {
+            role: "system",
+            content: `⚠️ MCP tools are available but ${selectedModel} doesn't support tool calling. Consider using functionary-small-v3.2 or another tool-enabled model.`,
+          };
+          setChatHistory((prev) => [...prev, warningMessage]);
+        }
+
+        // Use regular Ollama chat
+        const response = await fetch(
+          `http://localhost:${ollamaPort}/api/generate`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: selectedModel,
+              prompt: currentMessage,
+              stream: false,
+            }),
+          },
+        );
+
+        const responseText = await response.text();
+        console.log("Raw response:", responseText);
+
+        let data;
+        try {
+          data = JSON.parse(responseText);
+          console.log("Parsed response:", data);
+        } catch (parseError) {
+          console.error("Failed to parse response:", parseError);
+          throw new Error(`Failed to parse response: ${responseText}`);
+        }
+
+        if (response.ok) {
+          const aiMessage = { role: "assistant", content: data.response };
+          setChatHistory((prev) => [...prev, aiMessage]);
+        } else {
+          const errorMessage = {
+            role: "error",
+            content: `Error: ${response.status} - ${
+              response.statusText
+            } - ${JSON.stringify(data)}`,
+          };
+          setChatHistory((prev) => [...prev, errorMessage]);
+        }
       }
     } catch (error) {
       const errorMsg =
@@ -230,6 +349,12 @@ function App() {
         ...prev,
         [serverName]: `MCP server result: ${result}`,
       }));
+
+      // Refresh MCP tools and server statuses after starting a server
+      setTimeout(() => {
+        loadMcpTools();
+        loadMcpServerStatuses();
+      }, 2000);
     } catch (error) {
       const errorMsg =
         error instanceof Error ? error.message : "An unknown error occurred";
@@ -310,8 +435,8 @@ function App() {
                 name: name,
                 command: config.command,
                 args: config.args,
-              })
-            )
+              }),
+            ),
           );
 
           setMcpServers((prev) => ({
@@ -362,7 +487,6 @@ function App() {
         </div>
       </div>
 
-
       <div className="card">
         <h3>Ollama Local AI</h3>
         <div className="form-row">
@@ -404,11 +528,19 @@ function App() {
               value={selectedModel || ""}
               onChange={(e) => setSelectedModel(e.target.value)}
             >
-              {availableModels.map((model) => (
-                <option key={model} value={model}>
-                  {model}
-                </option>
-              ))}
+              {availableModels.map((model) => {
+                const supportsTools = model.includes("functionary") || 
+                  model.includes("mistral") ||
+                  model.includes("command") ||
+                  model.includes("qwen") ||
+                  model.includes("hermes");
+                
+                return (
+                  <option key={model} value={model}>
+                    {model} {supportsTools && mcpTools.length > 0 ? "✅" : ""}
+                  </option>
+                );
+              })}
             </select>
           </div>
         )}
@@ -430,14 +562,75 @@ function App() {
           <input
             value={chatMessage}
             onChange={(e) => setChatMessage(e.target.value)}
-            placeholder={ollamaPort ? "Type your message..." : "Start Ollama server first..."}
+            placeholder={
+              ollamaPort
+                ? "Type your message..."
+                : "Start Ollama server first..."
+            }
             disabled={chatLoading || !ollamaPort}
             style={{ flex: 1 }}
           />
-          <button type="submit" disabled={chatLoading || !chatMessage.trim() || !ollamaPort}>
+          <button
+            type="submit"
+            disabled={chatLoading || !chatMessage.trim() || !ollamaPort}
+          >
             {chatLoading ? "Sending..." : "Send"}
           </button>
         </form>
+      </div>
+
+      <div className="card">
+        <h3>MCP Tools Discovery</h3>
+        <div className="form-row">
+          <button onClick={debugMcpBridge} className="button-debug">
+            Debug MCP Bridge
+          </button>
+        </div>
+
+        {mcpTools.length > 0 ? (
+          <div className="tools-list">
+            <h4>Available Tools ({mcpTools.length})</h4>
+            {mcpTools.map(({ serverName, tool }, index) => (
+              <div key={index} className="tool-card">
+                <div className="tool-header">
+                  <strong>
+                    {serverName}.{tool.name}
+                  </strong>
+                  <span
+                    className={`server-status ${
+                      mcpServerStatuses[serverName] ? "running" : "stopped"
+                    }`}
+                  >
+                    {mcpServerStatuses[serverName] ? "Running" : "Stopped"}
+                  </span>
+                </div>
+                {tool.description && (
+                  <div className="tool-description">{tool.description}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="status-text">
+            No MCP tools available. Start some MCP servers to see their tools
+            here.
+            {selectedModel && !selectedModel.includes("functionary") && 
+             !selectedModel.includes("mistral") && 
+             !selectedModel.includes("command") &&
+             !selectedModel.includes("qwen") &&
+             !selectedModel.includes("hermes") && (
+              <div style={{ marginTop: "10px", color: "#ff6b6b" }}>
+                ⚠️ Note: {selectedModel} doesn't support tool calling. 
+                To use MCP tools, install a compatible model like:
+                <ul style={{ marginTop: "5px", paddingLeft: "20px" }}>
+                  <li>ollama pull functionary-small-v3.2</li>
+                  <li>ollama pull mistral</li>
+                  <li>ollama pull qwen2.5</li>
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="card">

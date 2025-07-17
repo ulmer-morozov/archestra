@@ -503,3 +503,91 @@ button:disabled {
     color: #a0aec0;
   }
 }
+
+.tools-list {
+  margin-top: 15px;
+}
+
+.tool-card {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 10px;
+  backdrop-filter: blur(10px);
+}
+
+.tool-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.tool-header strong {
+  color: #ffffff;
+  font-size: 14px;
+}
+
+.server-status {
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.server-status.running {
+  background: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.server-status.stopped {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.tool-description {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.chat-message.tool {
+  background: rgba(16, 185, 129, 0.1);
+  border-left: 3px solid #10b981;
+}
+
+.chat-message.tool .role {
+  color: #10b981;
+  font-weight: 600;
+}
+
+.chat-message.system {
+  background: rgba(255, 193, 7, 0.1);
+  border-left: 3px solid #ffc107;
+  font-style: italic;
+}
+
+.chat-message.system .role {
+  color: #f59e0b;
+  font-weight: 600;
+}
+
+.button-debug {
+  background: rgba(255, 165, 0, 0.2);
+  color: #ffa500;
+  border: 1px solid rgba(255, 165, 0, 0.3);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.button-debug:hover {
+  background: rgba(255, 165, 0, 0.3);
+  transform: translateY(-1px);
+}
