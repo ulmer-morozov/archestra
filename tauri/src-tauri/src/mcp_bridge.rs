@@ -3,9 +3,10 @@ use std::collections::{HashMap, VecDeque};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::Command as TokioCommand;
-use tokio::sync::mpsc;
+use tokio::process::{Child, Command as TokioCommand};
+use tokio::sync::{mpsc, Mutex as TokioMutex};
 use uuid::Uuid;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonRpcRequest {
@@ -45,20 +46,30 @@ pub struct McpResource {
     pub mime_type: Option<String>,
 }
 
+// Constants for resource management
+const MAX_BUFFER_SIZE: usize = 1000;
+const RESPONSE_CLEANUP_INTERVAL: Duration = Duration::from_secs(300); // 5 minutes
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const CHANNEL_CAPACITY: usize = 100;
+
+#[derive(Debug)]
+pub struct ResponseEntry {
+    pub content: String,
+    pub timestamp: Instant,
+}
+
 #[derive(Debug)]
 pub struct McpServer {
-    #[allow(dead_code)]
     pub name: String,
-    #[allow(dead_code)]
     pub command: String,
-    #[allow(dead_code)]
     pub args: Vec<String>,
     pub tools: Vec<McpTool>,
-    #[allow(dead_code)]
     pub resources: Vec<McpResource>,
     pub stdin_tx: Option<mpsc::Sender<String>>,
-    pub response_buffer: Arc<Mutex<VecDeque<String>>>,
+    pub response_buffer: Arc<Mutex<VecDeque<ResponseEntry>>>,
+    pub process_handle: Option<Arc<TokioMutex<Child>>>,
     pub is_running: bool,
+    pub last_health_check: Instant,
 }
 
 pub struct McpBridge {
@@ -75,6 +86,16 @@ impl McpBridge {
     pub async fn start_mcp_server(&self, name: String, command: String, args: Vec<String>) -> Result<(), String> {
         println!("Starting MCP server '{}' with persistent connection", name);
 
+        // Check if server already exists
+        {
+            let servers = self.servers.lock().unwrap();
+            if let Some(existing) = servers.get(&name) {
+                if existing.is_running {
+                    return Err(format!("MCP server '{}' is already running", name));
+                }
+            }
+        }
+
         let mut child = TokioCommand::new("sandbox-exec")
             .arg("-f")
             .arg("./sandbox-exec-profiles/mcp-server-everything-for-now.sb")
@@ -84,11 +105,17 @@ impl McpBridge {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| format!("Failed to spawn MCP server: {}", e))?;
+            .map_err(|e| format!("Failed to spawn MCP server '{}': {}", name, e))?;
 
-        let stdin = child.stdin.take().ok_or("Failed to get stdin")?;
-        let stdout = child.stdout.take().ok_or("Failed to get stdout")?;
-        let stderr = child.stderr.take().ok_or("Failed to get stderr")?;
+        let stdin = child.stdin.take()
+            .ok_or_else(|| format!("Failed to get stdin for MCP server '{}'", name))?;
+        let stdout = child.stdout.take()
+            .ok_or_else(|| format!("Failed to get stdout for MCP server '{}'", name))?;
+        let stderr = child.stderr.take()
+            .ok_or_else(|| format!("Failed to get stderr for MCP server '{}'", name))?;
+        
+        // Store process handle
+        let process_handle = Arc::new(TokioMutex::new(child));
 
         // Handle stderr
         let server_name_clone = name.clone();
@@ -99,10 +126,10 @@ impl McpBridge {
             }
         });
 
-        // Create response buffer
-        let response_buffer = Arc::new(Mutex::new(VecDeque::new()));
+        // Create response buffer with bounded size
+        let response_buffer: Arc<Mutex<VecDeque<ResponseEntry>>> = Arc::new(Mutex::new(VecDeque::new()));
         
-        // Handle stdout with message parsing
+        // Handle stdout with message parsing and buffer management
         let server_name_clone = name.clone();
         let response_buffer_clone = response_buffer.clone();
         tokio::spawn(async move {
@@ -110,31 +137,47 @@ impl McpBridge {
             while let Ok(Some(line)) = stdout_reader.next_line().await {
                 println!("[MCP Server '{}' stdout] {}", server_name_clone, line);
                 
-                // Store response in buffer
+                // Store response in buffer with timestamp
                 {
                     let mut buffer = response_buffer_clone.lock().unwrap();
-                    buffer.push_back(line);
+                    
+                    // Clean up old entries
+                    let now = Instant::now();
+                    buffer.retain(|entry| now.duration_since(entry.timestamp) < RESPONSE_CLEANUP_INTERVAL);
+                    
+                    // Add new entry, respecting max buffer size
+                    if buffer.len() >= MAX_BUFFER_SIZE {
+                        buffer.pop_front();
+                    }
+                    
+                    buffer.push_back(ResponseEntry {
+                        content: line,
+                        timestamp: now,
+                    });
                 }
             }
+            println!("[MCP Server '{}'] stdout reader terminated", server_name_clone);
         });
 
-        // Handle stdin with channel communication
-        let (stdin_tx, mut stdin_rx) = mpsc::channel::<String>(100);
+        // Handle stdin with bounded channel
+        let (stdin_tx, mut stdin_rx) = mpsc::channel::<String>(CHANNEL_CAPACITY);
+        let server_name_for_stdin = name.clone();
         tokio::spawn(async move {
             let mut stdin = stdin;
             while let Some(message) = stdin_rx.recv().await {
                 if let Err(e) = stdin.write_all(message.as_bytes()).await {
-                    eprintln!("Failed to write to stdin: {}", e);
+                    eprintln!("[MCP Server '{}'] Failed to write to stdin: {}", server_name_for_stdin, e);
                     break;
                 }
                 if let Err(e) = stdin.flush().await {
-                    eprintln!("Failed to flush stdin: {}", e);
+                    eprintln!("[MCP Server '{}'] Failed to flush stdin: {}", server_name_for_stdin, e);
                     break;
                 }
             }
+            println!("[MCP Server '{}'] stdin writer terminated", server_name_for_stdin);
         });
 
-        // Create server struct
+        // Create server struct with all required fields
         let server = McpServer {
             name: name.clone(),
             command,
@@ -143,7 +186,9 @@ impl McpBridge {
             resources: Vec::new(),
             stdin_tx: Some(stdin_tx),
             response_buffer: response_buffer,
+            process_handle: Some(process_handle),
             is_running: true,
+            last_health_check: Instant::now(),
         };
 
         // Store server
@@ -182,14 +227,17 @@ impl McpBridge {
             })),
         };
 
-        // Wait for initialize response
-        match self.send_request_and_wait(server_name, &init_request).await {
+        // Wait for initialize response with retries
+        match self.send_request_with_retry(server_name, &init_request, 3).await {
             Ok(response) => {
                 println!("Initialize response: {:?}", response);
+                if let Some(error) = response.error {
+                    return Err(format!("Initialize error from server: {} (code: {})", 
+                                     error.message, error.code));
+                }
             }
             Err(e) => {
-                println!("Failed to initialize: {}", e);
-                return Err(e);
+                return Err(format!("Failed to initialize MCP server '{}': {}", server_name, e));
             }
         }
 
@@ -204,10 +252,13 @@ impl McpBridge {
         self.send_request(server_name, &initialized_notification).await?;
         
         // Give server time to process initialized notification
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
         // Discover tools
         self.discover_tools(server_name).await?;
+        
+        // Discover resources
+        self.discover_resources(server_name).await?;
 
         Ok(())
     }
@@ -222,8 +273,8 @@ impl McpBridge {
             params: None,
         };
 
-        // Send request and wait for response
-        match self.send_request_and_wait(server_name, &list_tools_request).await {
+        // Send request and wait for response with retries
+        match self.send_request_with_retry(server_name, &list_tools_request, 3).await {
             Ok(response) => {
                 println!("Received response for tools/list: {:?}", response);
                 
@@ -280,6 +331,61 @@ impl McpBridge {
         Ok(())
     }
 
+    async fn discover_resources(&self, server_name: &str) -> Result<(), String> {
+        println!("Discovering resources for MCP server '{}'", server_name);
+
+        let list_resources_request = JsonRpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: Uuid::new_v4().to_string(),
+            method: "resources/list".to_string(),
+            params: None,
+        };
+
+        // Send request and wait for response with retries
+        match self.send_request_with_retry(server_name, &list_resources_request, 2).await {
+            Ok(response) => {
+                println!("Received response for resources/list: {:?}", response);
+                
+                if let Some(result) = response.result {
+                    if let Ok(resources_data) = serde_json::from_value::<serde_json::Value>(result) {
+                        if let Some(resources_array) = resources_data.get("resources").and_then(|v| v.as_array()) {
+                            let mut resources = Vec::new();
+                            for resource_value in resources_array {
+                                match serde_json::from_value::<McpResource>(resource_value.clone()) {
+                                    Ok(resource) => {
+                                        println!("Successfully parsed resource: {}", resource.uri);
+                                        resources.push(resource);
+                                    }
+                                    Err(e) => {
+                                        println!("Failed to parse resource: {}", e);
+                                    }
+                                }
+                            }
+
+                            // Update server with discovered resources
+                            {
+                                let mut servers = self.servers.lock().unwrap();
+                                if let Some(server) = servers.get_mut(server_name) {
+                                    server.resources = resources;
+                                    println!("Discovered {} resources for server '{}'", server.resources.len(), server_name);
+                                }
+                            }
+                        }
+                    }
+                } else if let Some(error) = response.error {
+                    // Resources might not be supported by this server
+                    println!("Resources not supported by server '{}': {:?}", server_name, error);
+                }
+            }
+            Err(e) => {
+                // Non-fatal error - resources are optional
+                println!("Failed to get resources list (may not be supported): {}", e);
+            }
+        }
+
+        Ok(())
+    }
+
     async fn send_request(&self, server_name: &str, request: &JsonRpcRequest) -> Result<(), String> {
         let request_json = serde_json::to_string(request)
             .map_err(|e| format!("Failed to serialize request: {}", e))?;
@@ -302,6 +408,28 @@ impl McpBridge {
         Ok(())
     }
 
+    async fn send_request_with_retry(&self, server_name: &str, request: &JsonRpcRequest, max_retries: u32) -> Result<JsonRpcResponse, String> {
+        let mut retries = 0;
+        let mut last_error = String::new();
+        
+        while retries <= max_retries {
+            match self.send_request_and_wait(server_name, request).await {
+                Ok(response) => return Ok(response),
+                Err(e) => {
+                    last_error = e;
+                    if retries < max_retries {
+                        let delay = Duration::from_millis(100 * (2_u64.pow(retries)));
+                        println!("Request failed, retrying in {:?}... (attempt {}/{})", delay, retries + 1, max_retries);
+                        tokio::time::sleep(delay).await;
+                    }
+                    retries += 1;
+                }
+            }
+        }
+        
+        Err(format!("Request failed after {} retries: {}", max_retries, last_error))
+    }
+
     async fn send_request_and_wait(&self, server_name: &str, request: &JsonRpcRequest) -> Result<JsonRpcResponse, String> {
         self.send_request(server_name, request).await?;
 
@@ -316,32 +444,64 @@ impl McpBridge {
         };
 
         // Wait for response with timeout
-        let start_time = std::time::Instant::now();
-        let timeout_duration = std::time::Duration::from_secs(5);
+        let start_time = Instant::now();
         
-        while start_time.elapsed() < timeout_duration {
+        while start_time.elapsed() < REQUEST_TIMEOUT {
             // Check response buffer
             {
                 let mut buffer = response_buffer.lock().unwrap();
-                while let Some(line) = buffer.pop_front() {
+                
+                // Clean up old entries while we're here
+                let now = Instant::now();
+                buffer.retain(|entry| now.duration_since(entry.timestamp) < RESPONSE_CLEANUP_INTERVAL);
+                
+                // Process entries from oldest to newest
+                let mut found_response = None;
+                for (i, entry) in buffer.iter().enumerate() {
                     // Try to parse as JSON-RPC response
-                    if let Ok(response) = serde_json::from_str::<JsonRpcResponse>(&line) {
+                    if let Ok(response) = serde_json::from_str::<JsonRpcResponse>(&entry.content) {
                         if response.id == request.id {
-                            return Ok(response);
+                            found_response = Some((i, response));
+                            break;
                         }
                     }
+                }
+                
+                // Remove the found response and return it
+                if let Some((index, response)) = found_response {
+                    buffer.remove(index);
+                    return Ok(response);
                 }
             }
             
             // Wait a bit before checking again
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
 
-        Err("Request timed out".to_string())
+        Err(format!("Request '{}' to server '{}' timed out after {:?}", 
+                    request.method, server_name, REQUEST_TIMEOUT))
     }
 
     pub async fn execute_tool(&self, server_name: &str, tool_name: &str, arguments: serde_json::Value) -> Result<serde_json::Value, String> {
         println!("Executing tool '{}' on server '{}'", tool_name, server_name);
+
+        // Verify server is running
+        {
+            let servers = self.servers.lock().unwrap();
+            if let Some(server) = servers.get(server_name) {
+                if !server.is_running {
+                    return Err(format!("MCP server '{}' is not running", server_name));
+                }
+                
+                // Verify tool exists
+                let tool_exists = server.tools.iter().any(|t| t.name == tool_name);
+                if !tool_exists {
+                    return Err(format!("Tool '{}' not found on server '{}'", tool_name, server_name));
+                }
+            } else {
+                return Err(format!("MCP server '{}' not found", server_name));
+            }
+        }
 
         let tool_request = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
@@ -353,13 +513,18 @@ impl McpBridge {
             })),
         };
 
-        if let Ok(response) = self.send_request_and_wait(server_name, &tool_request).await {
-            if let Some(result) = response.result {
-                return Ok(result);
+        match self.send_request_with_retry(server_name, &tool_request, 2).await {
+            Ok(response) => {
+                if let Some(error) = response.error {
+                    Err(format!("Tool execution error: {} (code: {})", error.message, error.code))
+                } else if let Some(result) = response.result {
+                    Ok(result)
+                } else {
+                    Err("Tool execution returned empty result".to_string())
+                }
             }
+            Err(e) => Err(format!("Failed to execute tool '{}': {}", tool_name, e))
         }
-
-        Err("Tool execution failed".to_string())
     }
 
     pub fn get_all_tools(&self) -> Vec<(String, McpTool)> {
@@ -377,6 +542,21 @@ impl McpBridge {
         all_tools
     }
 
+    pub fn get_all_resources(&self) -> Vec<(String, McpResource)> {
+        let servers = self.servers.lock().unwrap();
+        let mut all_resources = Vec::new();
+
+        for (server_name, server) in servers.iter() {
+            if server.is_running {
+                for resource in &server.resources {
+                    all_resources.push((server_name.clone(), resource.clone()));
+                }
+            }
+        }
+
+        all_resources
+    }
+
     pub fn get_server_status(&self) -> HashMap<String, bool> {
         let servers = self.servers.lock().unwrap();
         servers.iter()
@@ -385,12 +565,60 @@ impl McpBridge {
     }
 
     pub async fn stop_server(&self, server_name: &str) -> Result<(), String> {
-        let mut servers = self.servers.lock().unwrap();
-        if let Some(server) = servers.get_mut(server_name) {
-            server.is_running = false;
-            server.stdin_tx = None;
-            println!("Stopped MCP server '{}'", server_name);
+        println!("Stopping MCP server '{}'", server_name);
+        
+        // Get the process handle and other resources
+        let (process_handle, stdin_tx) = {
+            let mut servers = self.servers.lock().unwrap();
+            if let Some(server) = servers.get_mut(server_name) {
+                server.is_running = false;
+                let handle = server.process_handle.take();
+                let stdin = server.stdin_tx.take();
+                (handle, stdin)
+            } else {
+                return Err(format!("Server '{}' not found", server_name));
+            }
+        };
+        
+        // Close stdin channel to signal shutdown
+        drop(stdin_tx);
+        
+        // Terminate the process if it exists
+        if let Some(handle) = process_handle {
+            // Clone the Arc to avoid holding the lock across await
+            let handle_clone = handle.clone();
+            
+            // Kill the process
+            {
+                let mut child = handle.lock().await;
+                if let Err(e) = child.start_kill() {
+                    eprintln!("Failed to kill MCP server '{}' process: {}", server_name, e);
+                }
+            } // Lock is dropped here
+            
+            // Wait for the process to exit
+            let wait_result = tokio::spawn(async move {
+                let mut child = handle_clone.lock().await;
+                child.wait().await
+            });
+            
+            match tokio::time::timeout(Duration::from_secs(5), wait_result).await {
+                Ok(Ok(Ok(status))) => {
+                    println!("MCP server '{}' exited with status: {:?}", server_name, status);
+                }
+                Ok(Ok(Err(e))) => {
+                    eprintln!("Error waiting for MCP server '{}' to exit: {}", server_name, e);
+                }
+                Ok(Err(e)) => {
+                    eprintln!("Task error waiting for MCP server '{}' to exit: {}", server_name, e);
+                }
+                Err(_) => {
+                    eprintln!("Timeout waiting for MCP server '{}' to exit", server_name);
+                }
+            }
         }
+        
+        println!("MCP server '{}' stopped successfully", server_name);
         Ok(())
     }
 
@@ -400,32 +628,56 @@ impl McpBridge {
         
         tokio::spawn(async move {
             loop {
-                tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+                tokio::time::sleep(Duration::from_secs(30)).await;
                 
-                let should_restart = false;
-                let is_running = {
-                    let servers = servers.lock().unwrap();
-                    if let Some(server) = servers.get(&server_name) {
+                let (should_check, process_handle) = {
+                    let mut servers_guard = servers.lock().unwrap();
+                    if let Some(server) = servers_guard.get_mut(&server_name) {
                         if !server.is_running {
-                            false // Server was stopped, exit monitoring
+                            (false, None) // Server was stopped, exit monitoring
                         } else {
-                            // In a real implementation, you would check if the process is still alive
-                            // For now, we'll just log that we're monitoring
-                            println!("Health check for MCP server '{}'", server_name);
-                            true
+                            server.last_health_check = Instant::now();
+                            (true, server.process_handle.clone())
                         }
                     } else {
-                        false // Server removed, exit monitoring
+                        (false, None) // Server removed, exit monitoring
                     }
                 };
                 
-                if !is_running {
+                if !should_check {
+                    println!("Health monitor for MCP server '{}' stopping", server_name);
                     break;
                 }
                 
-                if should_restart {
-                    println!("Restarting MCP server '{}'", server_name);
-                    // In a real implementation, you would restart the server here
+                // Check if process is still alive
+                if let Some(process_handle) = process_handle {
+                    let is_alive = {
+                        let mut child = process_handle.lock().await;
+                        match child.try_wait() {
+                            Ok(None) => true, // Process is still running
+                            Ok(Some(status)) => {
+                                println!("MCP server '{}' exited unexpectedly with status: {:?}", server_name, status);
+                                false
+                            }
+                            Err(e) => {
+                                eprintln!("Error checking MCP server '{}' process status: {}", server_name, e);
+                                false
+                            }
+                        }
+                    };
+                    
+                    if !is_alive {
+                        // Mark server as not running
+                        let mut servers_guard = servers.lock().unwrap();
+                        if let Some(server) = servers_guard.get_mut(&server_name) {
+                            server.is_running = false;
+                            server.process_handle = None;
+                            server.stdin_tx = None;
+                        }
+                        break;
+                    } else {
+                        println!("Health check passed for MCP server '{}'", server_name);
+                    }
                 }
             }
         });

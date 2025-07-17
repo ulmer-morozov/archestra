@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 interface MCPServer {
@@ -8,11 +8,18 @@ interface MCPServer {
 
 interface MCPCatalogsProps {
   mcpServers: { [key: string]: MCPServer };
-  setMcpServers: React.Dispatch<React.SetStateAction<{ [key: string]: MCPServer }>>;
+  setMcpServers: React.Dispatch<
+    React.SetStateAction<{ [key: string]: MCPServer }>
+  >;
   mcpServerStatus: { [key: string]: string };
-  setMcpServerStatus: React.Dispatch<React.SetStateAction<{ [key: string]: string }>>;
+  setMcpServerStatus: React.Dispatch<
+    React.SetStateAction<{ [key: string]: string }>
+  >;
   mcpServerLoading: { [key: string]: boolean };
-  setMcpServerLoading: React.Dispatch<React.SetStateAction<{ [key: string]: boolean }>>;
+  setMcpServerLoading: React.Dispatch<
+    React.SetStateAction<{ [key: string]: boolean }>
+  >;
+  mcpServerStatuses: { [key: string]: boolean };
 }
 
 export default function MCPCatalogs({
@@ -22,15 +29,17 @@ export default function MCPCatalogs({
   setMcpServerStatus,
   mcpServerLoading,
   setMcpServerLoading,
+  mcpServerStatuses,
 }: MCPCatalogsProps) {
   const [currentServerName, setCurrentServerName] = useState("");
   const [currentServerCommand, setCurrentServerCommand] = useState("env");
   const [currentServerArgs, setCurrentServerArgs] = useState("");
   const [jsonImport, setJsonImport] = useState("");
-  const [activeSection, setActiveSection] = useState<"none" | "import" | "add">("none");
+  const [activeSection, setActiveSection] = useState<"none" | "import" | "add">(
+    "none",
+  );
   const [showGmailSetup, setShowGmailSetup] = useState(false);
   const [gcpProject, setGcpProject] = useState("");
-  const [oauthCredentials, setOauthCredentials] = useState("");
   const [setupStep, setSetupStep] = useState(1);
 
   const serverListRef = useRef<HTMLDivElement>(null);
@@ -78,33 +87,28 @@ export default function MCPCatalogs({
     }
   }
 
-  async function runMcpServer(serverName: string) {
+  async function stopMcpServer(serverName: string) {
     setMcpServerLoading((prev) => ({ ...prev, [serverName]: true }));
     setMcpServerStatus((prev) => ({
       ...prev,
-      [serverName]: "Starting MCP server in sandbox...",
+      [serverName]: "Stopping MCP server...",
     }));
 
     try {
-      const server = mcpServers[serverName];
-      const result = await invoke("run_mcp_server_in_sandbox", {
-        serverName: serverName,
-        config: {
-          command: server.command,
-          args: server.args,
-        },
+      await invoke("stop_persistent_mcp_server", {
+        name: serverName,
       });
 
       setMcpServerStatus((prev) => ({
         ...prev,
-        [serverName]: `MCP server result: ${result}`,
+        [serverName]: "MCP server stopped",
       }));
     } catch (error) {
       const errorMsg =
         error instanceof Error ? error.message : "An unknown error occurred";
       setMcpServerStatus((prev) => ({
         ...prev,
-        [serverName]: `Error: ${errorMsg}`,
+        [serverName]: `Error stopping server: ${errorMsg}`,
       }));
     }
 
@@ -174,8 +178,8 @@ export default function MCPCatalogs({
                 name: name,
                 command: config.command,
                 args: config.args,
-              })
-            )
+              }),
+            ),
           );
 
           setMcpServers((prev) => ({
@@ -185,7 +189,9 @@ export default function MCPCatalogs({
           setJsonImport("");
           setActiveSection("none");
           alert(
-            `Successfully imported ${Object.keys(validServers).length} server(s)!`
+            `Successfully imported ${
+              Object.keys(validServers).length
+            } server(s)!`,
           );
 
           setTimeout(() => {
@@ -207,7 +213,7 @@ export default function MCPCatalogs({
       alert(
         `Error importing JSON: ${
           error instanceof Error ? error.message : "Invalid JSON"
-        }`
+        }`,
       );
     }
   }
@@ -349,8 +355,12 @@ export default function MCPCatalogs({
                 <div className="setup-instructions">
                   <ol>
                     <li>Go to APIs & Services {">"} Credentials</li>
-                    <li>Click "Create Credentials" {">"} "OAuth 2.0 Client IDs"</li>
-                    <li>Choose "Desktop application" as the application type</li>
+                    <li>
+                      Click "Create Credentials" {">"} "OAuth 2.0 Client IDs"
+                    </li>
+                    <li>
+                      Choose "Desktop application" as the application type
+                    </li>
                     <li>Give it a name (e.g., "Gmail MCP Client")</li>
                     <li>Click "Create"</li>
                     <li>Download the JSON file</li>
@@ -375,13 +385,18 @@ export default function MCPCatalogs({
                     <li>Rename the downloaded file to "gcp-oauth.keys.json"</li>
                     <li>Create directory: ~/.gmail-mcp</li>
                     <li>Move the file to: ~/.gmail-mcp/gcp-oauth.keys.json</li>
-                    <li>Run authentication: npx @gongrzhe/server-gmail-autoauth-mcp auth</li>
+                    <li>
+                      Run authentication: npx
+                      @gongrzhe/server-gmail-autoauth-mcp auth
+                    </li>
                   </ol>
                 </div>
                 <div className="code-block">
                   <code>
-                    mkdir -p ~/.gmail-mcp<br />
-                    mv ~/Downloads/gcp-oauth.keys.json ~/.gmail-mcp/<br />
+                    mkdir -p ~/.gmail-mcp
+                    <br />
+                    mv ~/Downloads/gcp-oauth.keys.json ~/.gmail-mcp/
+                    <br />
                     npx @gongrzhe/server-gmail-autoauth-mcp auth
                   </code>
                 </div>
@@ -413,7 +428,9 @@ export default function MCPCatalogs({
 
         <div className="action-buttons">
           <button
-            className={`action-button ${activeSection === "import" ? "active" : ""}`}
+            className={`action-button ${
+              activeSection === "import" ? "active" : ""
+            }`}
             onClick={() =>
               setActiveSection(activeSection === "import" ? "none" : "import")
             }
@@ -421,7 +438,9 @@ export default function MCPCatalogs({
             Import JSON
           </button>
           <button
-            className={`action-button ${activeSection === "add" ? "active" : ""}`}
+            className={`action-button ${
+              activeSection === "add" ? "active" : ""
+            }`}
             onClick={() =>
               setActiveSection(activeSection === "add" ? "none" : "add")
             }
@@ -516,12 +535,19 @@ export default function MCPCatalogs({
                       </div>
                     </div>
                     <div className="server-actions">
-                      <button
-                        onClick={() => runMcpServer(name)}
-                        disabled={mcpServerLoading[name]}
-                      >
-                        {mcpServerLoading[name] ? "Running..." : "Run"}
-                      </button>
+                      {mcpServerStatuses[name] ? (
+                        <button
+                          onClick={() => stopMcpServer(name)}
+                          disabled={mcpServerLoading[name]}
+                          className="button-danger"
+                        >
+                          {mcpServerLoading[name] ? "Stopping..." : "Stop"}
+                        </button>
+                      ) : (
+                        <span style={{ color: "#718096", fontSize: "0.9em" }}>
+                          Auto-starts with Ollama
+                        </span>
+                      )}
                       <button
                         onClick={() => removeMcpServer(name)}
                         disabled={mcpServerLoading[name]}
@@ -531,19 +557,31 @@ export default function MCPCatalogs({
                       </button>
                     </div>
                   </div>
-                  {mcpServerStatus[name] && (
+                  <div className="server-status">
                     <div
-                      className={`status-text ${
-                        mcpServerStatus[name].includes("Error")
-                          ? "status-error"
-                          : mcpServerStatus[name].includes("result")
-                          ? "status-success"
-                          : ""
+                      className={`status-indicator ${
+                        mcpServerStatuses[name]
+                          ? "status-running"
+                          : "status-stopped"
                       }`}
                     >
-                      {mcpServerStatus[name]}
+                      {mcpServerStatuses[name] ? "🟢 Running" : "⚫ Stopped"}
                     </div>
-                  )}
+                    {mcpServerStatus[name] && (
+                      <div
+                        className={`status-text ${
+                          mcpServerStatus[name].includes("Error")
+                            ? "status-error"
+                            : mcpServerStatus[name].includes("success") ||
+                              mcpServerStatus[name].includes("Auto-started")
+                            ? "status-success"
+                            : ""
+                        }`}
+                      >
+                        {mcpServerStatus[name]}
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

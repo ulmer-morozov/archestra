@@ -161,54 +161,46 @@ async fn ollama_chat_with_tools(
         .map_err(|e| format!("Failed to parse response: {}", e))?;
 
     // Check if the response contains tool calls
-    if let Some(message) = response_data.get("message") {
-        if let Some(tool_calls) = message.get("tool_calls") {
-            if let Some(tool_calls_array) = tool_calls.as_array() {
-                println!("Ollama requested {} tool calls", tool_calls_array.len());
-                
-                // Execute each tool call
-                let mut tool_results = Vec::new();
-                for tool_call in tool_calls_array {
-                    if let Some(function) = tool_call.get("function") {
-                        if let Some(name) = function.get("name").and_then(|n| n.as_str()) {
-                            if let Some(arguments) = function.get("arguments") {
-                                // Parse server name and tool name from the combined name
-                                if let Some((server_name, tool_name)) = name.split_once('_') {
-                                    println!("Executing tool '{}' on server '{}'", tool_name, server_name);
-                                    
-                                    match bridge_state.0.execute_tool(server_name, tool_name, arguments.clone()).await {
-                                        Ok(result) => {
-                                            tool_results.push(OllamaToolResponse {
-                                                role: "tool".to_string(),
-                                                content: result.to_string(),
-                                                tool_call_id: tool_call.get("id").and_then(|id| id.as_str()).map(|s| s.to_string()),
-                                            });
-                                        }
-                                        Err(e) => {
-                                            tool_results.push(OllamaToolResponse {
-                                                role: "tool".to_string(),
-                                                content: format!("Error executing tool: {}", e),
-                                                tool_call_id: tool_call.get("id").and_then(|id| id.as_str()).map(|s| s.to_string()),
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Return the response with tool results
-                return Ok(serde_json::json!({
-                    "message": message,
-                    "tool_results": tool_results
-                }));
-            }
-        }
+    let Some(message) = response_data.get("message") else {
+        return Ok(response_data);
+    };
+    
+    let Some(tool_calls_array) = message.get("tool_calls").and_then(|tc| tc.as_array()) else {
+        return Ok(response_data);
+    };
+    
+    println!("Ollama requested {} tool calls", tool_calls_array.len());
+    
+    // Execute each tool call
+    let mut tool_results = Vec::new();
+    for tool_call in tool_calls_array {
+        let tool_call_id = tool_call.get("id").and_then(|id| id.as_str()).map(|s| s.to_string());
+        
+        // Extract function details with early continue on failure
+        let Some(function) = tool_call.get("function") else { continue; };
+        let Some(name) = function.get("name").and_then(|n| n.as_str()) else { continue; };
+        let Some(arguments) = function.get("arguments") else { continue; };
+        let Some((server_name, tool_name)) = name.split_once('_') else { continue; };
+        
+        println!("Executing tool '{}' on server '{}'", tool_name, server_name);
+        
+        let content = match bridge_state.0.execute_tool(server_name, tool_name, arguments.clone()).await {
+            Ok(result) => result.to_string(),
+            Err(e) => format!("Error executing tool: {}", e),
+        };
+        
+        tool_results.push(OllamaToolResponse {
+            role: "tool".to_string(),
+            content,
+            tool_call_id,
+        });
     }
-
-    // Return regular response if no tool calls
-    Ok(response_data)
+    
+    // Return the response with tool results
+    Ok(serde_json::json!({
+        "message": message,
+        "tool_results": tool_results
+    }))
 }
 
 #[tauri::command]
