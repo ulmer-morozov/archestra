@@ -50,6 +50,7 @@ pub struct McpResource {
 const MAX_BUFFER_SIZE: usize = 1000;
 const RESPONSE_CLEANUP_INTERVAL: Duration = Duration::from_secs(300); // 5 minutes
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const TOOLS_LIST_TIMEOUT: Duration = Duration::from_secs(5); // Shorter timeout for tools/list
 const CHANNEL_CAPACITY: usize = 100;
 
 #[derive(Debug)]
@@ -255,10 +256,27 @@ impl McpBridge {
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
         // Discover tools
-        self.discover_tools(server_name).await?;
+        if let Err(e) = self.discover_tools(server_name).await {
+            println!("⚠️ Tool discovery failed for '{}': {}", server_name, e);
+            // Try to register any known tools for this server type
+            self.register_known_tools_if_available(server_name).await;
+        } else {
+            // Check if we ended up with zero tools for a known server type
+            let tool_count = {
+                let servers = self.servers.lock().unwrap();
+                servers.get(server_name).map(|s| s.tools.len()).unwrap_or(0)
+            };
+            
+            if tool_count == 0 {
+                println!("🔄 Tool discovery succeeded but found 0 tools for '{}', trying fallback", server_name);
+                self.register_known_tools_if_available(server_name).await;
+            }
+        }
         
-        // Discover resources
-        self.discover_resources(server_name).await?;
+        // Discover resources (optional - some MCP servers may not support this)
+        if let Err(e) = self.discover_resources(server_name).await {
+            println!("⚠️ Resource discovery failed for '{}': {} (resources are optional)", server_name, e);
+        }
 
         Ok(())
     }
@@ -273,33 +291,37 @@ impl McpBridge {
             params: None,
         };
 
-        // Send request and wait for response with retries
-        match self.send_request_with_retry(server_name, &list_tools_request, 3).await {
+        // Send request and wait for response with shorter timeout for tools/list
+        match self.send_tools_list_request(server_name, &list_tools_request).await {
             Ok(response) => {
-                println!("Received response for tools/list: {:?}", response);
+                println!("✅ Received response for tools/list from '{}': {:?}", server_name, response);
                 
                 if let Some(result) = response.result {
-                    println!("Tools list result: {:?}", result);
+                    println!("🔍 Tools list result from '{}': {:?}", server_name, result);
                     
-                    if let Ok(tools_data) = serde_json::from_value::<serde_json::Value>(result) {
+                    if let Ok(tools_data) = serde_json::from_value::<serde_json::Value>(result.clone()) {
                         if let Some(tools_array) = tools_data.get("tools").and_then(|v| v.as_array()) {
+                            println!("🎯 Found {} tools in response from '{}'", tools_array.len(), server_name);
                             let mut tools = Vec::new();
                             for tool_value in tools_array {
-                                println!("Processing tool: {:?}", tool_value);
+                                println!("🔧 Processing tool from '{}': {:?}", server_name, tool_value);
                                 match serde_json::from_value::<McpTool>(tool_value.clone()) {
                                     Ok(tool) => {
-                                        println!("Successfully parsed tool: {}", tool.name);
+                                        println!("✅ Successfully parsed tool '{}' from server '{}'", tool.name, server_name);
                                         tools.push(tool);
                                     }
                                     Err(e) => {
-                                        println!("Failed to parse tool: {}", e);
+                                        println!("⚠️ Failed to parse tool from '{}': {}", server_name, e);
                                         // Try to create a minimal tool from the raw data
                                         if let Some(name) = tool_value.get("name").and_then(|v| v.as_str()) {
+                                            println!("🔧 Creating minimal tool '{}' from server '{}'", name, server_name);
                                             tools.push(McpTool {
                                                 name: name.to_string(),
                                                 description: tool_value.get("description").and_then(|v| v.as_str()).map(|s| s.to_string()),
                                                 input_schema: tool_value.get("inputSchema").cloned().unwrap_or_else(|| serde_json::json!({})),
                                             });
+                                        } else {
+                                            println!("❌ Could not extract tool name from: {:?}", tool_value);
                                         }
                                     }
                                 }
@@ -310,25 +332,102 @@ impl McpBridge {
                                 let mut servers = self.servers.lock().unwrap();
                                 if let Some(server) = servers.get_mut(server_name) {
                                     server.tools = tools;
-                                    println!("Discovered {} tools for server '{}'", server.tools.len(), server_name);
+                                    println!("🎉 Discovered {} tools for server '{}'. Total tools in bridge: {}", 
+                                             server.tools.len(), server_name, 
+                                             servers.values().map(|s| s.tools.len()).sum::<usize>());
                                 }
                             }
                         } else {
-                            println!("No 'tools' array found in response");
+                            println!("⚠️ No 'tools' array found in response from '{}': {:?}", server_name, tools_data);
+                            // Check if this is an empty tools response - try fallback
+                            if tools_data.get("tools").is_some() && tools_data.get("tools").unwrap().as_array().map_or(false, |arr| arr.is_empty()) {
+                                println!("🔄 Server '{}' returned empty tools array, trying fallback registration", server_name);
+                                return Err(format!("Empty tools list from server '{}' - triggering fallback", server_name));
+                            }
                         }
                     } else {
-                        println!("Failed to parse tools response as JSON");
+                        println!("❌ Failed to parse tools response as JSON from '{}': {:?}", server_name, result);
                     }
                 } else if let Some(error) = response.error {
-                    println!("Error response: {:?}", error);
+                    println!("❌ Error response from '{}': {:?}", server_name, error);
+                    return Err(format!("Tools/list error from server '{}': {:?}", server_name, error));
+                } else {
+                    println!("❌ Empty response from '{}' - no result or error", server_name);
+                    return Err(format!("Empty tools/list response from server '{}' - triggering fallback", server_name));
                 }
             }
             Err(e) => {
-                println!("Failed to get tools list response: {}", e);
+                println!("❌ Failed to get tools list response from '{}': {}", server_name, e);
+                // Return error so fallback mechanism can try to register known tools
+                return Err(format!("Tools discovery failed for server '{}': {}", server_name, e));
             }
         }
 
         Ok(())
+    }
+
+    async fn register_known_tools_if_available(&self, server_name: &str) {
+        // Register known tools for servers that don't support tools/list
+        // This is a fallback mechanism for servers with known tool sets
+        
+        println!("🔄 Attempting to register known tools for server '{}'", server_name);
+        
+        let known_tools = if server_name.to_lowercase().contains("context7") {
+            println!("✅ Found Context7 server, registering known tools");
+            // Context7 MCP server tools
+            vec![
+                McpTool {
+                    name: "resolve-library-id".to_string(),
+                    description: Some("Resolves a package/product name to a Context7-compatible library ID and returns a list of matching libraries.".to_string()),
+                    input_schema: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "libraryName": {
+                                "type": "string",
+                                "description": "Library name to search for and retrieve a Context7-compatible library ID."
+                            }
+                        },
+                        "required": ["libraryName"]
+                    })
+                },
+                McpTool {
+                    name: "get-library-docs".to_string(),
+                    description: Some("Fetches up-to-date documentation for a library. You must call 'resolve-library-id' first to obtain the exact Context7-compatible library ID required to use this tool.".to_string()),
+                    input_schema: serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "context7CompatibleLibraryID": {
+                                "type": "string",
+                                "description": "Exact Context7-compatible library ID (e.g., '/mongodb/docs', '/vercel/next.js', '/vercel/next.js/v14.3.0-canary.87')"
+                            },
+                            "tokens": {
+                                "type": "number",
+                                "description": "Maximum number of tokens of documentation to retrieve (default: 10000)"
+                            },
+                            "topic": {
+                                "type": "string",
+                                "description": "Topic to focus documentation on (e.g., 'hooks', 'routing')"
+                            }
+                        },
+                        "required": ["context7CompatibleLibraryID"]
+                    })
+                }
+            ]
+        } else {
+            // No known tools for this server type
+            println!("ℹ️ No known tools registered for server type '{}'", server_name);
+            return;
+        };
+
+        // Register the known tools
+        {
+            let mut servers = self.servers.lock().unwrap();
+            if let Some(server) = servers.get_mut(server_name) {
+                server.tools = known_tools;
+                println!("📚 Registered {} known tools for server '{}' (fallback method)", 
+                         server.tools.len(), server_name);
+            }
+        }
     }
 
     async fn discover_resources(&self, server_name: &str) -> Result<(), String> {
@@ -390,6 +489,8 @@ impl McpBridge {
         let request_json = serde_json::to_string(request)
             .map_err(|e| format!("Failed to serialize request: {}", e))?;
 
+        println!("📤 Sending request to '{}': {}", server_name, request_json);
+
         // Get stdin channel sender
         let stdin_tx = {
             let servers = self.servers.lock().unwrap();
@@ -401,8 +502,13 @@ impl McpBridge {
         };
 
         if let Some(stdin_tx) = stdin_tx {
-            stdin_tx.send(format!("{}\n", request_json)).await
+            let message_with_newline = format!("{}\n", request_json);
+            println!("📬 Sending {} bytes to '{}' stdin", message_with_newline.len(), server_name);
+            stdin_tx.send(message_with_newline).await
                 .map_err(|e| format!("Failed to send to stdin channel: {}", e))?;
+            println!("✅ Request sent successfully to '{}'", server_name);
+        } else {
+            return Err(format!("No stdin channel found for server '{}'", server_name));
         }
 
         Ok(())
@@ -428,6 +534,58 @@ impl McpBridge {
         }
         
         Err(format!("Request failed after {} retries: {}", max_retries, last_error))
+    }
+
+    async fn send_tools_list_request(&self, server_name: &str, request: &JsonRpcRequest) -> Result<JsonRpcResponse, String> {
+        self.send_request(server_name, request).await?;
+
+        // Get response buffer
+        let response_buffer = {
+            let servers = self.servers.lock().unwrap();
+            if let Some(server) = servers.get(server_name) {
+                server.response_buffer.clone()
+            } else {
+                return Err("Server not found".to_string());
+            }
+        };
+
+        // Wait for response with shorter timeout for tools/list
+        let start_time = Instant::now();
+        
+        while start_time.elapsed() < TOOLS_LIST_TIMEOUT {
+            // Check response buffer
+            {
+                let mut buffer = response_buffer.lock().unwrap();
+                
+                // Clean up old entries while we're here
+                let now = Instant::now();
+                buffer.retain(|entry| now.duration_since(entry.timestamp) < RESPONSE_CLEANUP_INTERVAL);
+                
+                // Process entries from oldest to newest
+                let mut found_response = None;
+                for (i, entry) in buffer.iter().enumerate() {
+                    // Try to parse as JSON-RPC response
+                    if let Ok(response) = serde_json::from_str::<JsonRpcResponse>(&entry.content) {
+                        if response.id == request.id {
+                            found_response = Some((i, response));
+                            break;
+                        }
+                    }
+                }
+                
+                // Remove the found response and return it
+                if let Some((index, response)) = found_response {
+                    buffer.remove(index);
+                    return Ok(response);
+                }
+            }
+            
+            // Wait a bit before checking again
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        Err(format!("Tools/list request '{}' to server '{}' timed out after {:?}", 
+                    request.method, server_name, TOOLS_LIST_TIMEOUT))
     }
 
     async fn send_request_and_wait(&self, server_name: &str, request: &JsonRpcRequest) -> Result<JsonRpcResponse, String> {
@@ -483,7 +641,7 @@ impl McpBridge {
     }
 
     pub async fn execute_tool(&self, server_name: &str, tool_name: &str, arguments: serde_json::Value) -> Result<serde_json::Value, String> {
-        println!("Executing tool '{}' on server '{}'", tool_name, server_name);
+        println!("🔧 Executing tool '{}' on server '{}' with args: {}", tool_name, server_name, arguments);
 
         // Verify server is running
         {
@@ -493,10 +651,14 @@ impl McpBridge {
                     return Err(format!("MCP server '{}' is not running", server_name));
                 }
                 
-                // Verify tool exists
+                // Check if tool exists in discovered tools, but allow execution even if not pre-discovered
                 let tool_exists = server.tools.iter().any(|t| t.name == tool_name);
-                if !tool_exists {
-                    return Err(format!("Tool '{}' not found on server '{}'", tool_name, server_name));
+                if !tool_exists && !server.tools.is_empty() {
+                    // Only reject if we have discovered tools but this isn't one of them
+                    return Err(format!("Tool '{}' not found on server '{}' (found {} other tools)", tool_name, server_name, server.tools.len()));
+                } else if !tool_exists {
+                    // No tools were discovered, but we'll try anyway - some servers don't support tools/list
+                    println!("⚠️ Tool '{}' not pre-discovered on server '{}', attempting execution anyway", tool_name, server_name);
                 }
             } else {
                 return Err(format!("MCP server '{}' not found", server_name));
@@ -518,6 +680,25 @@ impl McpBridge {
                 if let Some(error) = response.error {
                     Err(format!("Tool execution error: {} (code: {})", error.message, error.code))
                 } else if let Some(result) = response.result {
+                    // If tool executed successfully but wasn't pre-discovered, add it dynamically
+                    {
+                        let mut servers = self.servers.lock().unwrap();
+                        if let Some(server) = servers.get_mut(server_name) {
+                            let tool_exists = server.tools.iter().any(|t| t.name == tool_name);
+                            if !tool_exists {
+                                println!("✅ Tool '{}' executed successfully on '{}', adding to discovered tools", tool_name, server_name);
+                                server.tools.push(McpTool {
+                                    name: tool_name.to_string(),
+                                    description: Some(format!("Dynamically discovered tool from server {}", server_name)),
+                                    input_schema: serde_json::json!({
+                                        "type": "object",
+                                        "description": "Schema not available - tool was dynamically discovered"
+                                    }),
+                                });
+                                println!("📊 Server '{}' now has {} tools total", server_name, server.tools.len());
+                            }
+                        }
+                    }
                     Ok(result)
                 } else {
                     Err("Tool execution returned empty result".to_string())
@@ -562,6 +743,34 @@ impl McpBridge {
         servers.iter()
             .map(|(name, server)| (name.clone(), server.is_running))
             .collect()
+    }
+
+    pub fn get_debug_server_info(&self) -> Vec<String> {
+        let servers = self.servers.lock().unwrap();
+        let mut debug_info = Vec::new();
+        
+        for (name, server) in servers.iter() {
+            let mut server_info = format!("Server '{}': Command: {} {:?}", 
+                name, server.command, server.args);
+            server_info.push_str(&format!("\n  Running: {}", server.is_running));
+            server_info.push_str(&format!("\n  Tools Count: {}", server.tools.len()));
+            server_info.push_str(&format!("\n  Resources Count: {}", server.resources.len()));
+            server_info.push_str(&format!("\n  Has stdin: {}", server.stdin_tx.is_some()));
+            server_info.push_str(&format!("\n  Process handle: {}", server.process_handle.is_some()));
+            
+            // Response buffer info
+            if let Ok(buffer) = server.response_buffer.lock() {
+                server_info.push_str(&format!("\n  Response buffer size: {}", buffer.len()));
+                if !buffer.is_empty() {
+                    server_info.push_str(&format!("\n  Latest response: {}", 
+                        buffer.back().map(|e| e.content.as_str()).unwrap_or("None")));
+                }
+            }
+            
+            debug_info.push(server_info);
+        }
+        
+        debug_info
     }
 
     pub async fn stop_server(&self, server_name: &str) -> Result<(), String> {

@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import MCPCatalogs from "./components/MCPCatalogs";
+import MessageRenderer from "./components/MessageRenderer";
 import "./App.css";
 
 function App() {
@@ -11,25 +13,21 @@ function App() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [chatHistory, setChatHistory] = useState<
-    { role: string; content: string }[]
+    { role: string; content: string; isStreaming?: boolean }[]
   >([]);
   const [chatLoading, setChatLoading] = useState(false);
+
   const [mcpServers, setMcpServers] = useState<{
     [key: string]: { command: string; args: string[] };
   }>({});
-  const [currentServerName, setCurrentServerName] = useState("");
-  const [currentServerCommand, setCurrentServerCommand] = useState("env");
-  const [currentServerArgs, setCurrentServerArgs] = useState("");
-  const [jsonImport, setJsonImport] = useState("");
+
   const [mcpServerStatus, setMcpServerStatus] = useState<{
     [key: string]: string;
   }>({});
   const [mcpServerLoading, setMcpServerLoading] = useState<{
     [key: string]: boolean;
   }>({});
-  const [activeSection, setActiveSection] = useState<"none" | "import" | "add">(
-    "none",
-  );
+
   const [mcpTools, setMcpTools] = useState<
     Array<{
       serverName: string;
@@ -46,7 +44,6 @@ function App() {
   const [activeTab, setActiveTab] = useState<"chat" | "mcp">("chat");
   const [debugInfo, setDebugInfo] = useState<string>("");
 
-  const serverListRef = useRef<HTMLDivElement>(null);
   const debugRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -59,6 +56,74 @@ function App() {
     }, 5000); // Refresh every 5 seconds
 
     return () => clearInterval(interval);
+  }, []);
+
+  // Set up streaming event listeners
+  useEffect(() => {
+    const setupListeners = async () => {
+      // Listen for streaming chunks
+      const unlistenChunk = await listen("ollama-chunk", (event: any) => {
+        const { total_content } = event.payload;
+
+        // Update the streaming message in chat history
+        setChatHistory((prev) => {
+          const newHistory = [...prev];
+          const lastIndex = newHistory.length - 1;
+          if (newHistory[lastIndex]?.isStreaming) {
+            newHistory[lastIndex] = {
+              ...newHistory[lastIndex],
+              content: total_content,
+            };
+          }
+          return newHistory;
+        });
+      });
+
+      // Listen for tool results
+      const unlistenToolResults = await listen(
+        "ollama-tool-results",
+        (event: any) => {
+          const { tool_results } = event.payload;
+
+          if (tool_results && tool_results.length > 0) {
+            // Add tool execution results to chat history
+            const toolMessages = tool_results.map((result: any) => ({
+              role: "tool",
+              content: `🔧 Tool: ${result.content}`,
+            }));
+            setChatHistory((prev) => [...prev, ...toolMessages]);
+          }
+        },
+      );
+
+      // Listen for completion
+      const unlistenComplete = await listen("ollama-complete", (event: any) => {
+        const { content } = event.payload;
+
+        // Finalize the streaming message
+        setChatHistory((prev) => {
+          const newHistory = [...prev];
+          const lastIndex = newHistory.length - 1;
+          if (newHistory[lastIndex]?.isStreaming) {
+            newHistory[lastIndex] = {
+              role: "assistant",
+              content: content,
+            };
+          }
+          return newHistory;
+        });
+
+        setChatLoading(false);
+      });
+
+      return () => {
+        unlistenChunk();
+        unlistenToolResults();
+        unlistenComplete();
+      };
+    };
+
+    setupListeners();
   }, []);
 
   async function loadMcpServersFromDb() {
@@ -179,13 +244,22 @@ function App() {
   }
 
   async function sendChatMessage() {
-    if (!chatMessage.trim() || !ollamaPort) return;
+    if (!chatMessage.trim() || chatLoading || !ollamaPort || !selectedModel)
+      return;
 
-    setChatLoading(true);
     const userMessage = { role: "user", content: chatMessage };
-    setChatHistory((prev) => [...prev, userMessage]);
-    const currentMessage = chatMessage;
+    const newChatHistory = [...chatHistory, userMessage];
+    setChatHistory(newChatHistory);
     setChatMessage("");
+    setChatLoading(true);
+
+    // Add streaming message placeholder
+    const streamingMessage = {
+      role: "assistant",
+      content: "",
+      isStreaming: true,
+    };
+         setChatHistory((prev) => [...prev, streamingMessage]);
 
     try {
       // Check if the model supports tool calling
@@ -198,91 +272,112 @@ function App() {
           selectedModel.includes("hermes"));
 
       if (mcpTools.length > 0 && modelSupportsTools) {
-        // Use the enhanced tool-enabled chat
-        const messages = [
-          { role: "user", content: currentMessage, tool_calls: null },
-        ];
-
-        const response = await invoke<any>("ollama_chat_with_tools", {
+        // Use streaming tool-enhanced chat
+        await invoke("ollama_chat_with_tools_streaming", {
           port: ollamaPort,
           model: selectedModel,
-          messages: messages,
+          messages: newChatHistory,
         });
-
-        console.log("Tool-enabled response:", response);
-
-        if (response.tool_results && response.tool_results.length > 0) {
-          // Add tool execution results to chat history
-          for (const toolResult of response.tool_results) {
-            const toolMessage = {
-              role: "tool",
-              content: `Tool executed: ${toolResult.content}`,
-            };
-            setChatHistory((prev) => [...prev, toolMessage]);
-          }
-        }
-
-        if (response.message && response.message.content) {
-          const aiMessage = {
-            role: "assistant",
-            content: response.message.content,
-          };
-          setChatHistory((prev) => [...prev, aiMessage]);
-        }
       } else {
-        // Add warning if tools are available but model doesn't support them
-        if (mcpTools.length > 0 && !modelSupportsTools) {
-          const warningMessage = {
-            role: "system",
-            content: `⚠️ MCP tools are available but ${selectedModel} doesn't support tool calling. Consider using functionary-small-v3.2 or another tool-enabled model.`,
-          };
-          setChatHistory((prev) => [...prev, warningMessage]);
-        }
-
-        // Use regular Ollama chat
+        // Use regular streaming API
         const response = await fetch(
-          `http://localhost:${ollamaPort}/api/generate`,
+          `http://localhost:${ollamaPort}/api/chat`,
           {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+            },
             body: JSON.stringify({
               model: selectedModel,
-              prompt: currentMessage,
-              stream: false,
+              messages: newChatHistory,
+              stream: true,
+              options: {
+                temperature: 0.6,
+                top_p: 0.95,
+                top_k: 20,
+                num_predict: 32768,
+              },
             }),
           },
         );
 
-        const responseText = await response.text();
-        console.log("Raw response:", responseText);
-
-        let data;
-        try {
-          data = JSON.parse(responseText);
-          console.log("Parsed response:", data);
-        } catch (parseError) {
-          console.error("Failed to parse response:", parseError);
-          throw new Error(`Failed to parse response: ${responseText}`);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        if (response.ok) {
-          const aiMessage = { role: "assistant", content: data.response };
-          setChatHistory((prev) => [...prev, aiMessage]);
-        } else {
-          const errorMessage = {
-            role: "error",
-            content: `Error: ${response.status} - ${
-              response.statusText
-            } - ${JSON.stringify(data)}`,
-          };
-          setChatHistory((prev) => [...prev, errorMessage]);
+        const reader = response.body?.getReader();
+        if (!reader) {
+          throw new Error("No response body");
         }
+
+        let fullContent = "";
+        const decoder = new TextDecoder();
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value);
+          const lines = chunk.split("\n");
+
+          for (const line of lines) {
+            if (line.trim()) {
+              try {
+                const data = JSON.parse(line);
+                if (data.message?.content) {
+                  fullContent += data.message.content;
+
+                  // Update the streaming message in chat history
+                  setChatHistory((prev) => {
+                    const newHistory = [...prev];
+                    const lastIndex = newHistory.length - 1;
+                    if (newHistory[lastIndex]?.isStreaming) {
+                      newHistory[lastIndex] = {
+                        ...newHistory[lastIndex],
+                        content: fullContent,
+                      };
+                    }
+                    return newHistory;
+                  });
+                }
+              } catch (e) {
+                // Ignore JSON parse errors for partial chunks
+              }
+            }
+          }
+        }
+
+        // Finalize the message
+        setChatHistory((prev) => {
+          const newHistory = [...prev];
+          const lastIndex = newHistory.length - 1;
+          if (newHistory[lastIndex]?.isStreaming) {
+            newHistory[lastIndex] = {
+              role: "assistant",
+              content: fullContent,
+            };
+          }
+          return newHistory;
+        });
       }
     } catch (error) {
       const errorMsg =
         error instanceof Error ? error.message : "An unknown error occurred";
-      const errorMessage = { role: "error", content: `Error: ${errorMsg}` };
-      setChatHistory((prev) => [...prev, errorMessage]);
+
+      // Replace streaming message with error
+      setChatHistory((prev) => {
+        const newHistory = [...prev];
+        const lastIndex = newHistory.length - 1;
+        if (newHistory[lastIndex]?.isStreaming) {
+          newHistory[lastIndex] = {
+            role: "error",
+            content: `Error: ${errorMsg}`,
+          };
+        } else {
+          newHistory.push({ role: "error", content: `Error: ${errorMsg}` });
+        }
+        return newHistory;
+      });
     }
 
     setChatLoading(false);
@@ -455,7 +550,11 @@ function App() {
               {chatHistory.map((msg, index) => (
                 <div key={index} className={`chat-message ${msg.role}`}>
                   <div className="role">{msg.role}</div>
-                  <div>{msg.content}</div>
+                  <MessageRenderer
+                    content={msg.content}
+                    role={msg.role}
+                    isStreaming={msg.isStreaming}
+                  />
                 </div>
               ))}
             </div>

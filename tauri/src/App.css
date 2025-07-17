@@ -236,6 +236,92 @@ button:disabled {
   border: 1px solid rgba(160, 174, 192, 0.3);
 }
 
+/* Think blocks and streaming styles */
+.think-block {
+  margin: 0.5rem 0;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.think-toggle {
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0.75rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  color: #e2e8f0;
+  font-size: 0.9rem;
+  transition: background-color 0.2s;
+}
+
+.think-toggle:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.think-icon {
+  font-size: 1.1rem;
+}
+
+.think-label {
+  flex: 1;
+  text-align: left;
+  font-weight: 500;
+}
+
+.think-arrow {
+  color: #a0aec0;
+  font-size: 0.8rem;
+  transition: transform 0.2s;
+}
+
+.think-content {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.think-header {
+  padding: 0.5rem 1rem;
+  font-size: 0.8rem;
+  color: #a0aec0;
+  font-style: italic;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.think-text {
+  padding: 1rem;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  color: #cbd5e0;
+  white-space: pre-wrap;
+}
+
+.response-text {
+  color: #e2e8f0;
+  line-height: 1.6;
+}
+
+.streaming-cursor {
+  animation: blink 1s infinite;
+  color: #667eea;
+  font-weight: bold;
+  margin-left: 2px;
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+.message-content {
+  padding: 0;
+}
+
 .chat-history {
   background: #f8f9fa;
   border: 2px solid #e9ecef;
@@ -263,8 +349,9 @@ button:disabled {
 }
 
 .chat-message.assistant {
-  background: #e2e8f0;
-  color: #2d3748;
+  background: rgba(45, 55, 72, 0.8);
+  color: #e2e8f0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .chat-message.error {
