@@ -1,10 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import MCPCatalogs from "./modules/mcp-catalog/components/mcp-catalogs";
+import { ChatInput } from "./modules/chat/components/chat-input";
 import { Button } from "./components/ui/button";
-import { Input } from "./components/ui/input";
-import { Label } from "./components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
 import { Badge } from "./components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
@@ -16,9 +14,6 @@ function App() {
   const [ollamaPort, setOllamaPort] = useState<number | null>(null);
   const [ollamaStatus, setOllamaStatus] = useState("");
   const [isOllamaRunning, setIsOllamaRunning] = useState(false);
-  const [chatMessage, setChatMessage] = useState("");
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [chatHistory, setChatHistory] = useState<{ role: string; content: string }[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
   const [mcpServers, setMcpServers] = useState<{
@@ -46,7 +41,6 @@ function App() {
   const [activeTab, setActiveTab] = useState<"chat" | "mcp">("chat");
   const [debugInfo, setDebugInfo] = useState<string>("");
 
-  const serverListRef = useRef<HTMLDivElement>(null);
   const debugRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -191,9 +185,8 @@ function App() {
       setIsOllamaRunning(true);
       setOllamaStatus(`Ollama server started successfully on port ${port}`);
 
-      // Wait a moment for the server to start, then fetch available models and start MCP servers
+      // Wait a moment for the server to start, then start MCP servers
       setTimeout(() => {
-        fetchAvailableModels(port);
         autoStartMcpServers();
       }, 2000);
     } catch (error) {
@@ -221,42 +214,23 @@ function App() {
     }
   }
 
-  async function fetchAvailableModels(port: number) {
-    try {
-      const response = await fetch(`http://localhost:${port}/api/tags`);
-      if (response.ok) {
-        const data = await response.json();
-        const models = data.models?.map((model: any) => model.name) || [];
-
-        setAvailableModels(models);
-
-        if (models.length > 0 && !selectedModel) {
-          setSelectedModel(models[0]);
-        }
-      }
-    } catch (error) {
-      console.error("Failed to fetch models:", error);
-    }
-  }
-
-  async function sendChatMessage() {
-    if (!chatMessage.trim() || !ollamaPort) return;
+  async function sendChatMessage(message: string, model: string) {
+    if (!message.trim() || !ollamaPort) return;
 
     setChatLoading(true);
-    const userMessage = { role: "user", content: chatMessage };
+    const userMessage = { role: "user", content: message };
     setChatHistory((prev) => [...prev, userMessage]);
-    const currentMessage = chatMessage;
-    setChatMessage("");
+    const currentMessage = message;
 
     try {
       // Check if the model supports tool calling
       const modelSupportsTools =
-        selectedModel &&
-        (selectedModel.includes("functionary") ||
-          selectedModel.includes("mistral") ||
-          selectedModel.includes("command") ||
-          selectedModel.includes("qwen") ||
-          selectedModel.includes("hermes"));
+        model &&
+        (model.includes("functionary") ||
+          model.includes("mistral") ||
+          model.includes("command") ||
+          model.includes("qwen") ||
+          model.includes("hermes"));
 
       if (mcpTools.length > 0 && modelSupportsTools) {
         // Use the enhanced tool-enabled chat
@@ -264,7 +238,7 @@ function App() {
 
         const response = await invoke<any>("ollama_chat_with_tools", {
           port: ollamaPort,
-          model: selectedModel,
+          model: model,
           messages: messages,
         });
 
@@ -293,7 +267,7 @@ function App() {
         if (mcpTools.length > 0 && !modelSupportsTools) {
           const warningMessage = {
             role: "system",
-            content: `⚠️ MCP tools are available but ${selectedModel} doesn't support tool calling. Consider using functionary-small-v3.2 or another tool-enabled model.`,
+            content: `⚠️ MCP tools are available but ${model} doesn't support tool calling. Consider using functionary-small-v3.2 or another tool-enabled model.`,
           };
           setChatHistory((prev) => [...prev, warningMessage]);
         }
@@ -303,7 +277,7 @@ function App() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            model: selectedModel,
+            model: model,
             prompt: currentMessage,
             stream: false,
           }),
@@ -418,45 +392,10 @@ function App() {
             <Card>
               <CardHeader>
                 <CardTitle>Chat with Ollama</CardTitle>
-                {ollamaPort && availableModels.length > 0 && (
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2">
-                      <Label htmlFor="model-select">Model:</Label>
-                      <Select value={selectedModel || ""} onValueChange={setSelectedModel}>
-                        <SelectTrigger id="model-select" className="w-64">
-                          <SelectValue placeholder="Select a model" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {availableModels.map((model) => {
-                            const supportsTools =
-                              model.includes("functionary") ||
-                              model.includes("mistral") ||
-                              model.includes("command") ||
-                              model.includes("qwen") ||
-                              model.includes("hermes");
-
-                            return (
-                              <SelectItem key={model} value={model}>
-                                <div className="flex items-center gap-2">
-                                  {model}
-                                  {supportsTools && mcpTools.length > 0 && (
-                                    <Badge variant="secondary" className="text-xs">
-                                      Tools ✓
-                                    </Badge>
-                                  )}
-                                </div>
-                              </SelectItem>
-                            );
-                          })}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {mcpTools.length > 0 && (
-                      <Badge variant="outline" className="text-xs">
-                        {mcpTools.length} MCP tool{mcpTools.length !== 1 ? "s" : ""} available
-                      </Badge>
-                    )}
-                  </div>
+                {mcpTools.length > 0 && (
+                  <Badge variant="outline" className="text-xs">
+                    {mcpTools.length} MCP tool{mcpTools.length !== 1 ? "s" : ""} available
+                  </Badge>
                 )}
               </CardHeader>
               <CardContent className="space-y-4">
@@ -484,24 +423,9 @@ function App() {
                   </div>
                 </ScrollArea>
 
-                <form
-                  className="flex gap-2"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    sendChatMessage();
-                  }}
-                >
-                  <Input
-                    value={chatMessage}
-                    onChange={(e) => setChatMessage(e.target.value)}
-                    placeholder={ollamaPort ? "Type your message..." : "Start Ollama server first..."}
-                    disabled={chatLoading || !ollamaPort}
-                    className="flex-1"
-                  />
-                  <Button type="submit" disabled={chatLoading || !chatMessage.trim() || !ollamaPort}>
-                    {chatLoading ? "Sending..." : "Send"}
-                  </Button>
-                </form>
+                {ollamaPort && (
+                  <ChatInput onSubmit={sendChatMessage} disabled={chatLoading || !ollamaPort} ollamaPort={ollamaPort} />
+                )}
               </CardContent>
             </Card>
 

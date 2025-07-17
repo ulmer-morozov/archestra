@@ -21,6 +21,7 @@ interface SimpleChatInputProps {
   onSubmit: (message: string, model: string) => Promise<void>;
   onModelChange?: () => void;
   disabled?: boolean;
+  ollamaPort?: number | null;
 }
 
 interface OllamaModel {
@@ -40,7 +41,7 @@ interface OllamaResponse {
   models: OllamaModel[];
 }
 
-export function ChatInput({ onSubmit, onModelChange, disabled = false }: SimpleChatInputProps) {
+export function ChatInput({ onSubmit, onModelChange, disabled = false, ollamaPort }: SimpleChatInputProps) {
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState<"submitted" | "streaming" | "ready" | "error">("ready");
   const [models, setModels] = useState<OllamaModel[]>([]);
@@ -53,7 +54,8 @@ export function ChatInput({ onSubmit, onModelChange, disabled = false }: SimpleC
       setModelsLoading(true);
       setModelsError(null);
 
-      const response = await fetch("http://localhost:11434/api/tags");
+      const port = ollamaPort || 11434;
+      const response = await fetch(`http://localhost:${port}/api/tags`);
 
       if (!response.ok) {
         throw new Error(`Failed to fetch models: ${response.status}`);
@@ -74,8 +76,10 @@ export function ChatInput({ onSubmit, onModelChange, disabled = false }: SimpleC
   };
 
   useEffect(() => {
-    fetchModels();
-  }, [selectedModel]);
+    if (ollamaPort) {
+      fetchModels();
+    }
+  }, [selectedModel, ollamaPort]);
 
   const handleSubmit = async (e?: React.FormEvent<HTMLFormElement>) => {
     if (e) {
