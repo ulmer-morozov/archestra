@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import reactLogo from "./assets/react.svg";
 import { invoke } from "@tauri-apps/api/core";
 import { Command } from "@tauri-apps/plugin-shell";
@@ -47,6 +47,11 @@ function App() {
   const [mcpServerLoading, setMcpServerLoading] = useState<{
     [key: string]: boolean;
   }>({});
+  const [activeSection, setActiveSection] = useState<"none" | "import" | "add">(
+    "none",
+  );
+
+  const serverListRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     invoke<number>("get_hello_server_port").then(setSidecarPort);
@@ -161,6 +166,17 @@ function App() {
 
     setCurrentServerName("");
     setCurrentServerArgs("");
+    setActiveSection("none");
+
+    // Scroll to the server list to show the newly added server
+    setTimeout(() => {
+      if (serverListRef.current) {
+        serverListRef.current.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+        });
+      }
+    }, 100);
   }
 
   async function runMcpServer(serverName: string) {
@@ -172,7 +188,7 @@ function App() {
 
     try {
       const server = mcpServers[serverName];
-      const result = await invoke("start_mcp_server_in_sandbox", {
+      const result = await invoke("run_mcp_server_in_sandbox", {
         serverName: serverName,
         config: {
           command: server.command,
@@ -254,11 +270,22 @@ function App() {
           ...validServers,
         }));
         setJsonImport("");
+        setActiveSection("none");
         alert(
           `Successfully imported ${
             Object.keys(validServers).length
           } server(s)!`,
         );
+
+        // Scroll to the server list to show the newly imported servers
+        setTimeout(() => {
+          if (serverListRef.current) {
+            serverListRef.current.scrollIntoView({
+              behavior: "smooth",
+              block: "nearest",
+            });
+          }
+        }, 100);
       } else {
         alert("No valid servers found in the JSON");
       }
@@ -377,12 +404,37 @@ function App() {
       <div className="card">
         <h3>MCP Servers Configuration</h3>
 
-        <div className="import-section">
-          <h4>Import from JSON</h4>
-          <textarea
-            value={jsonImport}
-            onChange={(e) => setJsonImport(e.target.value)}
-            placeholder={`Paste MCP JSON configuration, e.g.:
+        <div className="action-buttons">
+          <button
+            className={`action-button ${
+              activeSection === "import" ? "active" : ""
+            }`}
+            onClick={() =>
+              setActiveSection(activeSection === "import" ? "none" : "import")
+            }
+          >
+            Import JSON
+          </button>
+          <button
+            className={`action-button ${
+              activeSection === "add" ? "active" : ""
+            }`}
+            onClick={() =>
+              setActiveSection(activeSection === "add" ? "none" : "add")
+            }
+          >
+            Add New MCP
+          </button>
+        </div>
+
+        {activeSection === "import" && (
+          <div className="import-section">
+            <div className="collapsible-content">
+              <h4>Import from JSON</h4>
+              <textarea
+                value={jsonImport}
+                onChange={(e) => setJsonImport(e.target.value)}
+                placeholder={`Paste MCP JSON configuration, e.g.:
 {
   "mcpServers": {
     "context7": {
@@ -391,55 +443,64 @@ function App() {
     }
   }
 }`}
-            className="import-textarea"
-          />
-          <div className="form-row">
-            <button onClick={importFromJson} disabled={!jsonImport.trim()}>
-              Import Servers
-            </button>
+                className="import-textarea"
+              />
+              <div className="form-row">
+                <button onClick={importFromJson} disabled={!jsonImport.trim()}>
+                  Import Servers
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
+        )}
 
-        <div className="add-server-section">
-          <h4>Add New MCP Server</h4>
-          <div className="form-group">
-            <label>Server Name</label>
-            <input
-              value={currentServerName}
-              onChange={(e) => setCurrentServerName(e.target.value)}
-              placeholder="e.g., github, context7, browser-tools"
-            />
-          </div>
+        {activeSection === "add" && (
+          <div className="add-server-section">
+            <div className="collapsible-content">
+              <h4>Add New MCP Server</h4>
+              <div className="form-group">
+                <label>Server Name</label>
+                <input
+                  value={currentServerName}
+                  onChange={(e) => setCurrentServerName(e.target.value)}
+                  placeholder="e.g., github, context7, browser-tools"
+                />
+              </div>
 
-          <div className="form-row-responsive">
-            <input
-              value={currentServerArgs}
-              onChange={(e) => setCurrentServerArgs(e.target.value)}
-              placeholder="Arguments (e.g., GITHUB_PERSONAL_ACCESS_TOKEN=token npx -y @modelcontextprotocol/server-github)"
-            />
-            <select
-              value={currentServerCommand}
-              onChange={(e) => setCurrentServerCommand(e.target.value)}
-            >
-              <option value="env">env</option>
-              <option value="npx">npx</option>
-              <option value="node">node</option>
-            </select>
-          </div>
+              <div className="form-row-responsive">
+                <input
+                  value={currentServerArgs}
+                  onChange={(e) => setCurrentServerArgs(e.target.value)}
+                  placeholder="Arguments (e.g., GITHUB_PERSONAL_ACCESS_TOKEN=token npx -y @modelcontextprotocol/server-github)"
+                />
+                <select
+                  value={currentServerCommand}
+                  onChange={(e) => setCurrentServerCommand(e.target.value)}
+                >
+                  <option value="env">env</option>
+                  <option value="npx">npx</option>
+                  <option value="node">node</option>
+                </select>
+              </div>
 
-          <div className="form-row">
-            <button onClick={addMcpServer} disabled={!currentServerName.trim()}>
-              Add Server Configuration
-            </button>
+              <div className="form-row">
+                <button
+                  onClick={addMcpServer}
+                  disabled={!currentServerName.trim()}
+                >
+                  Add Server Configuration
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
+        )}
 
         <div>
           <h4>Configured MCP Servers</h4>
           {Object.entries(mcpServers).length === 0 ? (
             <div className="status-text">No servers configured yet.</div>
           ) : (
-            <div className="server-list">
+            <div className="server-list" ref={serverListRef}>
               {Object.entries(mcpServers).map(([name, config]) => (
                 <div key={name} className="server-card">
                   <div className="server-header">

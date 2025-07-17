@@ -36,73 +36,6 @@ fn get_hello_server_port(state: State<PortState>) -> u16 {
 #[tauri::command]
 async fn run_mcp_server_in_sandbox(
     _app: tauri::AppHandle,
-    config: McpServerConfig,
-) -> Result<String, String> {
-    use std::process::Stdio;
-    use tokio::io::{AsyncBufReadExt, BufReader};
-    use tokio::process::Command as TokioCommand;
-
-    println!("Ayo! Running MCP server '{}' in sandbox, fuggedaboutit!", config.package_name);
-
-    // Build the npx command with the MCP server package
-    let mut npx_args = vec![config.package_name.as_str()];
-    if !config.args.is_empty() {
-        npx_args.extend(config.args.iter().map(|s| s.as_str()));
-    }
-
-    // TODO: find a better way to run npx
-    // Use the full path to npx from nvm
-    // let npx_path = "/Users/joeyorlando/.nvm/versions/node/v18.16.0/bin/npx";
-
-    let mut child = TokioCommand::new("sandbox-exec")
-        .arg("-f").arg("./sandbox-exec-profiles/mcp-server-everything-for-now.sb")
-        // TODO: this assumes npx is installed, is there a way around this?
-        // like running it without npx?
-        .arg("npx")
-        .args(&npx_args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Failed to spawn sandboxed MCP server: {}", e))?;
-
-    println!("MCP server '{}' started in sandbox!", config.package_name);
-
-    // Handle stdout
-    if let Some(stdout) = child.stdout.take() {
-        let mut reader = BufReader::new(stdout).lines();
-        tauri::async_runtime::spawn(async move {
-            while let Ok(Some(line)) = reader.next_line().await {
-                print!("[MCP Server stdout] {}\n", line);
-            }
-        });
-    }
-
-    // Handle stderr
-    if let Some(stderr) = child.stderr.take() {
-        let mut reader = BufReader::new(stderr).lines();
-        tauri::async_runtime::spawn(async move {
-            while let Ok(Some(line)) = reader.next_line().await {
-                eprint!("[MCP Server stderr] {}\n", line);
-            }
-        });
-    }
-
-    // Wait for the process to complete
-    match child.wait().await {
-        Ok(status) => {
-            if status.success() {
-                Ok(format!("MCP server '{}' completed successfully", config.package_name))
-            } else {
-                Ok(format!("MCP server '{}' exited with status: {:?}", config.package_name, status))
-            }
-        }
-        Err(e) => Err(format!("MCP server failed: {}", e))
-    }
-}
-
-#[tauri::command]
-async fn start_mcp_server_in_sandbox(
-    _app: tauri::AppHandle,
     server_name: String,
     config: McpServerDefinition,
 ) -> Result<String, String> {
@@ -120,7 +53,7 @@ async fn start_mcp_server_in_sandbox(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Failed to spawn sandboxed MCP server '{}': {}", server_name, e))?;
+        .map_err(|e| format!("Failed to spawn sandboxed MCP server: {}", e))?;
 
     println!("MCP server '{}' started in sandbox!", server_name);
 
@@ -130,8 +63,7 @@ async fn start_mcp_server_in_sandbox(
         let server_name_clone = server_name.clone();
         tauri::async_runtime::spawn(async move {
             while let Ok(Some(line)) = reader.next_line().await {
-                print!("[MCP Server '{}' stdout] {}
-", server_name_clone, line);
+                print!("[MCP Server '{}' stdout] {}\n", server_name_clone, line);
             }
         });
     }
@@ -142,8 +74,7 @@ async fn start_mcp_server_in_sandbox(
         let server_name_clone = server_name.clone();
         tauri::async_runtime::spawn(async move {
             while let Ok(Some(line)) = reader.next_line().await {
-                eprint!("[MCP Server '{}' stderr] {}
-", server_name_clone, line);
+                eprint!("[MCP Server '{}' stderr] {}\n", server_name_clone, line);
             }
         });
     }
@@ -157,9 +88,10 @@ async fn start_mcp_server_in_sandbox(
                 Ok(format!("MCP server '{}' exited with status: {:?}", server_name, status))
             }
         }
-        Err(e) => Err(format!("MCP server '{}' failed: {}", server_name, e))
+        Err(e) => Err(format!("MCP server failed: {}", e))
     }
 }
+
 
 fn get_free_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0")
@@ -271,7 +203,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![greet, get_hello_server_port, run_mcp_server_in_sandbox, start_mcp_server_in_sandbox])
+        .invoke_handler(tauri::generate_handler![greet, get_hello_server_port, run_mcp_server_in_sandbox])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
