@@ -1,7 +1,16 @@
 import { useState, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import MCPCatalogs from "./components/MCPCatalogs";
-import "./App.css";
+import MCPCatalogs from "./modules/mcp-catalog/components/mcp-catalogs";
+import { Button } from "./components/ui/button";
+import { Input } from "./components/ui/input";
+import { Label } from "./components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./components/ui/select";
+import { Badge } from "./components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
+import { ScrollArea } from "./components/ui/scroll-area";
+import { CheckCircle, XCircle, MessageCircle, Bot } from "lucide-react";
+import "./index.css";
 
 function App() {
   const [ollamaPort, setOllamaPort] = useState<number | null>(null);
@@ -10,9 +19,7 @@ function App() {
   const [chatMessage, setChatMessage] = useState("");
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
-  const [chatHistory, setChatHistory] = useState<
-    { role: string; content: string }[]
-  >([]);
+  const [chatHistory, setChatHistory] = useState<{ role: string; content: string }[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
   const [mcpServers, setMcpServers] = useState<{
     [key: string]: { command: string; args: string[] };
@@ -27,9 +34,7 @@ function App() {
   const [mcpServerLoading, setMcpServerLoading] = useState<{
     [key: string]: boolean;
   }>({});
-  const [activeSection, setActiveSection] = useState<"none" | "import" | "add">(
-    "none",
-  );
+  const [activeSection, setActiveSection] = useState<"none" | "import" | "add">("none");
   const [mcpTools, setMcpTools] = useState<
     Array<{
       serverName: string;
@@ -49,13 +54,13 @@ function App() {
 
   useEffect(() => {
     loadMcpServersFromDb();
-    
+
     // Set up periodic refresh of MCP tools for automatic discovery
     const interval = setInterval(() => {
       loadMcpTools();
       loadMcpServerStatuses();
     }, 5000); // Refresh every 5 seconds
-    
+
     return () => clearInterval(interval);
   }, []);
 
@@ -84,7 +89,7 @@ function App() {
               name: string;
               description?: string;
               input_schema: any;
-            },
+            }
           ]
         >
       >("get_mcp_tools");
@@ -110,7 +115,6 @@ function App() {
     }
   }
 
-
   async function runOllamaServe() {
     console.log("runOllamaServe called, isOllamaRunning:", isOllamaRunning);
 
@@ -132,8 +136,7 @@ function App() {
         fetchAvailableModels(port);
       }, 2000);
     } catch (error) {
-      const errorMsg =
-        error instanceof Error ? error.message : JSON.stringify(error);
+      const errorMsg = error instanceof Error ? error.message : JSON.stringify(error);
       setOllamaStatus(`Error starting Ollama: ${errorMsg}`);
       setIsOllamaRunning(false);
       console.error("Error starting Ollama:", error);
@@ -149,8 +152,7 @@ function App() {
       setOllamaPort(null);
       setOllamaStatus("Ollama server stopped");
     } catch (error) {
-      const errorMsg =
-        error instanceof Error ? error.message : JSON.stringify(error);
+      const errorMsg = error instanceof Error ? error.message : JSON.stringify(error);
       setOllamaStatus(`Error stopping Ollama: ${errorMsg}`);
       console.error("Error stopping Ollama:", error);
       setIsOllamaRunning(false);
@@ -187,19 +189,17 @@ function App() {
 
     try {
       // Check if the model supports tool calling
-      const modelSupportsTools = selectedModel && (
-        selectedModel.includes("functionary") || 
-        selectedModel.includes("mistral") ||
-        selectedModel.includes("command") ||
-        selectedModel.includes("qwen") ||
-        selectedModel.includes("hermes")
-      );
+      const modelSupportsTools =
+        selectedModel &&
+        (selectedModel.includes("functionary") ||
+          selectedModel.includes("mistral") ||
+          selectedModel.includes("command") ||
+          selectedModel.includes("qwen") ||
+          selectedModel.includes("hermes"));
 
       if (mcpTools.length > 0 && modelSupportsTools) {
         // Use the enhanced tool-enabled chat
-        const messages = [
-          { role: "user", content: currentMessage, tool_calls: null },
-        ];
+        const messages = [{ role: "user", content: currentMessage, tool_calls: null }];
 
         const response = await invoke<any>("ollama_chat_with_tools", {
           port: ollamaPort,
@@ -238,18 +238,15 @@ function App() {
         }
 
         // Use regular Ollama chat
-        const response = await fetch(
-          `http://localhost:${ollamaPort}/api/generate`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              model: selectedModel,
-              prompt: currentMessage,
-              stream: false,
-            }),
-          },
-        );
+        const response = await fetch(`http://localhost:${ollamaPort}/api/generate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: selectedModel,
+            prompt: currentMessage,
+            stream: false,
+          }),
+        });
 
         const responseText = await response.text();
         console.log("Raw response:", responseText);
@@ -269,16 +266,13 @@ function App() {
         } else {
           const errorMessage = {
             role: "error",
-            content: `Error: ${response.status} - ${
-              response.statusText
-            } - ${JSON.stringify(data)}`,
+            content: `Error: ${response.status} - ${response.statusText} - ${JSON.stringify(data)}`,
           };
           setChatHistory((prev) => [...prev, errorMessage]);
         }
       }
     } catch (error) {
-      const errorMsg =
-        error instanceof Error ? error.message : "An unknown error occurred";
+      const errorMsg = error instanceof Error ? error.message : "An unknown error occurred";
       const errorMessage = { role: "error", content: `Error: ${errorMsg}` };
       setChatHistory((prev) => [...prev, errorMessage]);
     }
@@ -292,9 +286,7 @@ function App() {
       return;
     }
 
-    const args = currentServerArgs.trim()
-      ? currentServerArgs.split(" ").filter((arg) => arg.trim())
-      : [];
+    const args = currentServerArgs.trim() ? currentServerArgs.split(" ").filter((arg) => arg.trim()) : [];
 
     try {
       await invoke("save_mcp_server", {
@@ -358,8 +350,7 @@ function App() {
         loadMcpServerStatuses();
       }, 2000);
     } catch (error) {
-      const errorMsg =
-        error instanceof Error ? error.message : "An unknown error occurred";
+      const errorMsg = error instanceof Error ? error.message : "An unknown error occurred";
       setMcpServerStatus((prev) => ({
         ...prev,
         [serverName]: `Error: ${errorMsg}`,
@@ -415,12 +406,7 @@ function App() {
         [key: string]: { command: string; args: string[] };
       } = {};
       Object.entries(serversToImport).forEach(([name, config]) => {
-        if (
-          typeof config === "object" &&
-          "command" in config &&
-          "args" in config &&
-          Array.isArray(config.args)
-        ) {
+        if (typeof config === "object" && "command" in config && "args" in config && Array.isArray(config.args)) {
           validServers[name] = {
             command: config.command,
             args: config.args,
@@ -437,8 +423,8 @@ function App() {
                 name: name,
                 command: config.command,
                 args: config.args,
-              }),
-            ),
+              })
+            )
           );
 
           setMcpServers((prev) => ({
@@ -447,11 +433,7 @@ function App() {
           }));
           setJsonImport("");
           setActiveSection("none");
-          alert(
-            `Successfully imported ${
-              Object.keys(validServers).length
-            } server(s)!`,
-          );
+          alert(`Successfully imported ${Object.keys(validServers).length} server(s)!`);
 
           // Scroll to the server list to show the newly imported servers
           setTimeout(() => {
@@ -470,153 +452,184 @@ function App() {
         alert("No valid servers found in the JSON");
       }
     } catch (error) {
-      alert(
-        `Error importing JSON: ${
-          error instanceof Error ? error.message : "Invalid JSON"
-        }`,
-      );
+      alert(`Error importing JSON: ${error instanceof Error ? error.message : "Invalid JSON"}`);
     }
   }
 
   return (
-    <main className="container">
-      <div className="header">
-        <h1>archestra.ai</h1>
-        <div className="logo-row">
-          <a href="https://vitejs.dev" target="_blank">
-            <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-          </a>
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="container mx-auto px-4 py-8 max-w-6xl">
+        <div className="mb-8 text-center">
+          <h1 className="text-4xl font-bold mb-4 bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+            archestra.ai
+          </h1>
         </div>
-      </div>
 
-      <div className="nav-tabs">
-        <button
-          className={`nav-tab ${activeTab === "chat" ? "active" : ""}`}
-          onClick={() => setActiveTab("chat")}
+        <Tabs
+          value={activeTab}
+          onValueChange={(value: string) => setActiveTab(value as "chat" | "mcp")}
+          className="mb-6"
         >
-          Chat with AI
-        </button>
-        <button
-          className={`nav-tab ${activeTab === "mcp" ? "active" : ""}`}
-          onClick={() => setActiveTab("mcp")}
-        >
-          MCP Catalogs
-        </button>
-      </div>
+          <TabsList className="grid w-full grid-cols-2">
+            <TabsTrigger value="chat" className="flex items-center gap-2">
+              <MessageCircle className="h-4 w-4" />
+              Chat with AI
+            </TabsTrigger>
+            <TabsTrigger value="mcp" className="flex items-center gap-2">
+              <Bot className="h-4 w-4" />
+              MCP Catalogs
+            </TabsTrigger>
+          </TabsList>
 
-      {activeTab === "chat" && (
-        <>
-          <div className="card">
-            <h3>Ollama Local AI</h3>
-            <div className="form-row">
-              {!isOllamaRunning ? (
-                <button onClick={runOllamaServe}>Start Ollama Server</button>
-              ) : (
-                <button onClick={stopOllamaServe} className="button-danger">
-                  Stop Ollama Server
-                </button>
-              )}
-            </div>
-
-            {ollamaStatus && (
-              <div
-                className={`status-text ${
-                  ollamaStatus.includes("Error")
-                    ? "status-error"
-                    : ollamaStatus.includes("successfully")
-                    ? "status-success"
-                    : ""
-                }`}
-              >
-                {ollamaStatus}
-              </div>
-            )}
-            {ollamaPort && (
-              <div className="status-text status-success">
-                Ollama running on port: {ollamaPort}
-              </div>
-            )}
-          </div>
-
-          <div className="card">
-            <h3>Chat with Ollama</h3>
-            {ollamaPort && availableModels.length > 0 && (
-              <div className="form-row">
-                <label>Model:</label>
-                <select
-                  value={selectedModel || ""}
-                  onChange={(e) => setSelectedModel(e.target.value)}
-                >
-                  {availableModels.map((model) => {
-                    const supportsTools = model.includes("functionary") || 
-                      model.includes("mistral") ||
-                      model.includes("command") ||
-                      model.includes("qwen") ||
-                      model.includes("hermes");
-                    
-                    return (
-                      <option key={model} value={model}>
-                        {model} {supportsTools && mcpTools.length > 0 ? "✅" : ""}
-                      </option>
-                    );
-                  })}
-                </select>
-                {mcpTools.length > 0 && (
-                  <span style={{ marginLeft: "10px", fontSize: "0.9em", color: "#718096" }}>
-                    {mcpTools.length} MCP tool{mcpTools.length !== 1 ? 's' : ''} available
-                  </span>
-                )}
-              </div>
-            )}
-            <div className="chat-history">
-              {chatHistory.map((msg, index) => (
-                <div key={index} className={`chat-message ${msg.role}`}>
-                  <div className="role">{msg.role}</div>
-                  <div>{msg.content}</div>
+          <TabsContent value="chat" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Bot className="h-5 w-5" />
+                  Ollama Local AI
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex gap-2">
+                  {!isOllamaRunning ? (
+                    <Button onClick={runOllamaServe} className="flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4" />
+                      Start Ollama Server
+                    </Button>
+                  ) : (
+                    <Button onClick={stopOllamaServe} variant="destructive" className="flex items-center gap-2">
+                      <XCircle className="h-4 w-4" />
+                      Stop Ollama Server
+                    </Button>
+                  )}
                 </div>
-              ))}
-            </div>
-            <form
-              className="form-row"
-              onSubmit={(e) => {
-                e.preventDefault();
-                sendChatMessage();
-              }}
-            >
-              <input
-                value={chatMessage}
-                onChange={(e) => setChatMessage(e.target.value)}
-                placeholder={
-                  ollamaPort
-                    ? "Type your message..."
-                    : "Start Ollama server first..."
-                }
-                disabled={chatLoading || !ollamaPort}
-                style={{ flex: 1 }}
-              />
-              <button
-                type="submit"
-                disabled={chatLoading || !chatMessage.trim() || !ollamaPort}
-              >
-                {chatLoading ? "Sending..." : "Send"}
-              </button>
-            </form>
-          </div>
 
-        </>
-      )}
+                {ollamaStatus && (
+                  <div
+                    className={`p-3 rounded-md text-sm ${
+                      ollamaStatus.includes("Error")
+                        ? "bg-destructive/10 text-destructive border border-destructive/20"
+                        : ollamaStatus.includes("successfully")
+                        ? "bg-green-500/10 text-green-600 border border-green-500/20"
+                        : "bg-muted text-muted-foreground border"
+                    }`}
+                  >
+                    {ollamaStatus}
+                  </div>
+                )}
 
-      {activeTab === "mcp" && (
-        <MCPCatalogs
-          mcpServers={mcpServers}
-          setMcpServers={setMcpServers}
-          mcpServerStatus={mcpServerStatus}
-          setMcpServerStatus={setMcpServerStatus}
-          mcpServerLoading={mcpServerLoading}
-          setMcpServerLoading={setMcpServerLoading}
-        />
-      )}
-    </main>
+                {ollamaPort && (
+                  <div className="p-3 rounded-md bg-green-500/10 text-green-600 border border-green-500/20 text-sm">
+                    Ollama running on port: {ollamaPort}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Chat with Ollama</CardTitle>
+                {ollamaPort && availableModels.length > 0 && (
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <Label htmlFor="model-select">Model:</Label>
+                      <Select value={selectedModel || ""} onValueChange={setSelectedModel}>
+                        <SelectTrigger id="model-select" className="w-64">
+                          <SelectValue placeholder="Select a model" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableModels.map((model) => {
+                            const supportsTools =
+                              model.includes("functionary") ||
+                              model.includes("mistral") ||
+                              model.includes("command") ||
+                              model.includes("qwen") ||
+                              model.includes("hermes");
+
+                            return (
+                              <SelectItem key={model} value={model}>
+                                <div className="flex items-center gap-2">
+                                  {model}
+                                  {supportsTools && mcpTools.length > 0 && (
+                                    <Badge variant="secondary" className="text-xs">
+                                      Tools ✓
+                                    </Badge>
+                                  )}
+                                </div>
+                              </SelectItem>
+                            );
+                          })}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {mcpTools.length > 0 && (
+                      <Badge variant="outline" className="text-xs">
+                        {mcpTools.length} MCP tool{mcpTools.length !== 1 ? "s" : ""} available
+                      </Badge>
+                    )}
+                  </div>
+                )}
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <ScrollArea className="h-96 w-full rounded-md border p-4">
+                  <div className="space-y-4">
+                    {chatHistory.map((msg, index) => (
+                      <div
+                        key={index}
+                        className={`p-3 rounded-lg ${
+                          msg.role === "user"
+                            ? "bg-primary/10 border border-primary/20 ml-8"
+                            : msg.role === "assistant"
+                            ? "bg-secondary/50 border border-secondary mr-8"
+                            : msg.role === "error"
+                            ? "bg-destructive/10 border border-destructive/20 text-destructive"
+                            : msg.role === "system"
+                            ? "bg-yellow-500/10 border border-yellow-500/20 text-yellow-600"
+                            : "bg-muted border"
+                        }`}
+                      >
+                        <div className="text-xs font-medium mb-1 opacity-70 capitalize">{msg.role}</div>
+                        <div className="text-sm whitespace-pre-wrap">{msg.content}</div>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+
+                <form
+                  className="flex gap-2"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    sendChatMessage();
+                  }}
+                >
+                  <Input
+                    value={chatMessage}
+                    onChange={(e) => setChatMessage(e.target.value)}
+                    placeholder={ollamaPort ? "Type your message..." : "Start Ollama server first..."}
+                    disabled={chatLoading || !ollamaPort}
+                    className="flex-1"
+                  />
+                  <Button type="submit" disabled={chatLoading || !chatMessage.trim() || !ollamaPort}>
+                    {chatLoading ? "Sending..." : "Send"}
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="mcp">
+            <MCPCatalogs
+              mcpServers={mcpServers}
+              setMcpServers={setMcpServers}
+              mcpServerStatus={mcpServerStatus}
+              setMcpServerStatus={setMcpServerStatus}
+              mcpServerLoading={mcpServerLoading}
+              setMcpServerLoading={setMcpServerLoading}
+            />
+          </TabsContent>
+        </Tabs>
+      </div>
+    </div>
   );
 }
 
