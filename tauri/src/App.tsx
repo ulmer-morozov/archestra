@@ -49,14 +49,15 @@ function App() {
 
   useEffect(() => {
     loadMcpServersFromDb();
-  }, []);
-
-  useEffect(() => {
-    if (activeTab === "chat") {
+    
+    // Set up periodic refresh of MCP tools for automatic discovery
+    const interval = setInterval(() => {
       loadMcpTools();
       loadMcpServerStatuses();
-    }
-  }, [activeTab]);
+    }, 5000); // Refresh every 5 seconds
+    
+    return () => clearInterval(interval);
+  }, []);
 
   async function loadMcpServersFromDb() {
     try {
@@ -109,15 +110,6 @@ function App() {
     }
   }
 
-  async function debugMcpBridge() {
-    try {
-      const debugInfo = await invoke<string>("debug_mcp_bridge");
-      console.log("MCP Bridge Debug:", debugInfo);
-      alert(debugInfo);
-    } catch (error) {
-      console.error("Failed to debug MCP bridge:", error);
-    }
-  }
 
   async function runOllamaServe() {
     console.log("runOllamaServe called, isOllamaRunning:", isOllamaRunning);
@@ -569,6 +561,11 @@ function App() {
                     );
                   })}
                 </select>
+                {mcpTools.length > 0 && (
+                  <span style={{ marginLeft: "10px", fontSize: "0.9em", color: "#718096" }}>
+                    {mcpTools.length} MCP tool{mcpTools.length !== 1 ? 's' : ''} available
+                  </span>
+                )}
               </div>
             )}
             <div className="chat-history">
@@ -606,59 +603,6 @@ function App() {
             </form>
           </div>
 
-          <div className="card">
-            <h3>MCP Tools Discovery</h3>
-            <div className="form-row">
-              <button onClick={debugMcpBridge} className="button-debug">
-                Debug MCP Bridge
-              </button>
-            </div>
-
-            {mcpTools.length > 0 ? (
-              <div className="tools-list">
-                <h4>Available Tools ({mcpTools.length})</h4>
-                {mcpTools.map(({ serverName, tool }, index) => (
-                  <div key={index} className="tool-card">
-                    <div className="tool-header">
-                      <strong>
-                        {serverName}.{tool.name}
-                      </strong>
-                      <span
-                        className={`server-status ${
-                          mcpServerStatuses[serverName] ? "running" : "stopped"
-                        }`}
-                      >
-                        {mcpServerStatuses[serverName] ? "Running" : "Stopped"}
-                      </span>
-                    </div>
-                    {tool.description && (
-                      <div className="tool-description">{tool.description}</div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="status-text">
-                No MCP tools available. Start some MCP servers to see their tools
-                here.
-                {selectedModel && !selectedModel.includes("functionary") && 
-                 !selectedModel.includes("mistral") && 
-                 !selectedModel.includes("command") &&
-                 !selectedModel.includes("qwen") &&
-                 !selectedModel.includes("hermes") && (
-                  <div style={{ marginTop: "10px", color: "#ff6b6b" }}>
-                    ⚠️ Note: {selectedModel} doesn't support tool calling. 
-                    To use MCP tools, install a compatible model like:
-                    <ul style={{ marginTop: "5px", paddingLeft: "20px" }}>
-                      <li>ollama pull functionary-small-v3.2</li>
-                      <li>ollama pull mistral</li>
-                      <li>ollama pull qwen2.5</li>
-                    </ul>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
         </>
       )}
 
