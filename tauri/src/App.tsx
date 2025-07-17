@@ -5,6 +5,7 @@ import "./App.css";
 function App() {
   const [ollamaPort, setOllamaPort] = useState<number | null>(null);
   const [ollamaStatus, setOllamaStatus] = useState("");
+  const [isOllamaRunning, setIsOllamaRunning] = useState(false);
   const [chatMessage, setChatMessage] = useState("");
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
@@ -51,10 +52,19 @@ function App() {
 
 
   async function runOllamaServe() {
+    console.log("runOllamaServe called, isOllamaRunning:", isOllamaRunning);
+
+    // Prevent multiple starts
+    if (isOllamaRunning) {
+      setOllamaStatus("Ollama server is already running");
+      return;
+    }
+
     try {
       setOllamaStatus("Starting Ollama server...");
       const port = await invoke<number>("start_ollama_server");
       setOllamaPort(port);
+      setIsOllamaRunning(true);
       setOllamaStatus(`Ollama server started successfully on port ${port}`);
 
       // Wait a moment for the server to start, then fetch available models
@@ -65,6 +75,26 @@ function App() {
       const errorMsg =
         error instanceof Error ? error.message : JSON.stringify(error);
       setOllamaStatus(`Error starting Ollama: ${errorMsg}`);
+      setIsOllamaRunning(false);
+      console.error("Error starting Ollama:", error);
+    }
+  }
+
+  async function stopOllamaServe() {
+    setOllamaStatus("Stopping Ollama server...");
+
+    try {
+      await invoke("stop_ollama_server");
+      setIsOllamaRunning(false);
+      setOllamaPort(null);
+      setOllamaStatus("Ollama server stopped");
+    } catch (error) {
+      const errorMsg =
+        error instanceof Error ? error.message : JSON.stringify(error);
+      setOllamaStatus(`Error stopping Ollama: ${errorMsg}`);
+      console.error("Error stopping Ollama:", error);
+      setIsOllamaRunning(false);
+      setOllamaPort(null);
     }
   }
 
@@ -305,7 +335,13 @@ function App() {
       <div className="card">
         <h3>Ollama Local AI</h3>
         <div className="form-row">
-          <button onClick={runOllamaServe}>Start Ollama Server</button>
+          {!isOllamaRunning ? (
+            <button onClick={runOllamaServe}>Start Ollama Server</button>
+          ) : (
+            <button onClick={stopOllamaServe} className="button-danger">
+              Stop Ollama Server
+            </button>
+          )}
         </div>
 
         {ollamaStatus && (

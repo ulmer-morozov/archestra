@@ -16,7 +16,7 @@ pub struct McpServersConfig {
 }
 
 #[tauri::command]
-async fn start_mcp_server_in_sandbox(
+async fn run_mcp_server_in_sandbox(
     _app: tauri::AppHandle,
     server_name: String,
     config: McpServerDefinition,
@@ -119,6 +119,19 @@ async fn start_ollama_server(app_handle: tauri::AppHandle) -> Result<u16, String
     }
 }
 
+#[tauri::command]
+async fn stop_ollama_server() -> Result<(), String> {
+    println!("Stopping Ollama server...");
+    
+    std::process::Command::new("pkill")
+        .args(&["-f", "ollama"])
+        .output()
+        .map_err(|e| format!("Failed to stop Ollama: {}", e))?;
+    
+    println!("Ollama server stopped");
+    Ok(())
+}
+
 fn get_free_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
@@ -141,7 +154,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![start_mcp_server_in_sandbox, start_ollama_server])
+        .invoke_handler(tauri::generate_handler![run_mcp_server_in_sandbox, start_ollama_server, stop_ollama_server])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

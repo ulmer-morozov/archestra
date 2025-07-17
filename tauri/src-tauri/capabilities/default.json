@@ -13,10 +13,15 @@
           "name": "binaries/ollama",
           "sidecar": true,
           "args": ["serve"]
+        },
+        {
+          "name": "pkill",
+          "args": ["-f", "ollama"]
         }
       ]
     },
     "shell:allow-open",
+    "shell:allow-kill",
     "shell:default"
   ]
 }
