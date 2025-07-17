@@ -24,6 +24,7 @@ import {
   ExternalLink,
   Copy,
   CheckCircle,
+  XCircle,
 } from "lucide-react";
 
 interface MCPServer {
@@ -38,6 +39,7 @@ interface MCPCatalogsProps {
   setMcpServerStatus: React.Dispatch<React.SetStateAction<{ [key: string]: string }>>;
   mcpServerLoading: { [key: string]: boolean };
   setMcpServerLoading: React.Dispatch<React.SetStateAction<{ [key: string]: boolean }>>;
+  mcpServerStatuses: { [key: string]: boolean };
 }
 
 export default function MCPCatalogs({
@@ -47,6 +49,7 @@ export default function MCPCatalogs({
   setMcpServerStatus,
   mcpServerLoading,
   setMcpServerLoading,
+  mcpServerStatuses,
 }: MCPCatalogsProps) {
   const [currentServerName, setCurrentServerName] = useState("");
   const [currentServerCommand, setCurrentServerCommand] = useState("env");
@@ -127,6 +130,33 @@ export default function MCPCatalogs({
       setMcpServerStatus((prev) => ({
         ...prev,
         [serverName]: `Error: ${errorMsg}`,
+      }));
+    }
+
+    setMcpServerLoading((prev) => ({ ...prev, [serverName]: false }));
+  }
+
+  async function stopMcpServer(serverName: string) {
+    setMcpServerLoading((prev) => ({ ...prev, [serverName]: true }));
+    setMcpServerStatus((prev) => ({
+      ...prev,
+      [serverName]: "Stopping MCP server...",
+    }));
+
+    try {
+      await invoke("stop_persistent_mcp_server", {
+        name: serverName,
+      });
+
+      setMcpServerStatus((prev) => ({
+        ...prev,
+        [serverName]: "MCP server stopped",
+      }));
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "An unknown error occurred";
+      setMcpServerStatus((prev) => ({
+        ...prev,
+        [serverName]: `Error stopping server: ${errorMsg}`,
       }));
     }
 
@@ -663,6 +693,9 @@ export default function MCPCatalogs({
                               <Badge variant="outline" className="text-xs">
                                 {config.command}
                               </Badge>
+                              <Badge variant={mcpServerStatuses[name] ? "default" : "secondary"} className="text-xs">
+                                {mcpServerStatuses[name] ? "🟢 Running" : "⚫ Stopped"}
+                              </Badge>
                             </div>
                             <div className="text-sm text-muted-foreground space-y-1">
                               <div>
@@ -677,7 +710,8 @@ export default function MCPCatalogs({
                                 className={`text-sm p-2 rounded border ${
                                   mcpServerStatus[name].includes("Error")
                                     ? "bg-destructive/10 text-destructive border-destructive/20"
-                                    : mcpServerStatus[name].includes("result")
+                                    : mcpServerStatus[name].includes("result") ||
+                                      mcpServerStatus[name].includes("Auto-started")
                                     ? "bg-green-500/10 text-green-600 border-green-500/20"
                                     : "bg-muted text-muted-foreground border-muted"
                                 }`}
@@ -687,24 +721,29 @@ export default function MCPCatalogs({
                             )}
                           </div>
                           <div className="flex items-center gap-2 ml-4">
-                            <Button
-                              size="sm"
-                              onClick={() => runMcpServer(name)}
-                              disabled={mcpServerLoading[name]}
-                              className="flex items-center gap-2"
-                            >
-                              {mcpServerLoading[name] ? (
-                                <>
-                                  <div className="h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                                  Running...
-                                </>
-                              ) : (
-                                <>
-                                  <Play className="h-3 w-3" />
-                                  Run
-                                </>
-                              )}
-                            </Button>
+                            {mcpServerStatuses[name] ? (
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => stopMcpServer(name)}
+                                disabled={mcpServerLoading[name]}
+                                className="flex items-center gap-2"
+                              >
+                                {mcpServerLoading[name] ? (
+                                  <>
+                                    <div className="h-3 w-3 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                                    Stopping...
+                                  </>
+                                ) : (
+                                  <>
+                                    <XCircle className="h-3 w-3" />
+                                    Stop
+                                  </>
+                                )}
+                              </Button>
+                            ) : (
+                              <div className="text-sm text-muted-foreground">Auto-starts with Ollama</div>
+                            )}
                             <Button
                               size="sm"
                               variant="destructive"

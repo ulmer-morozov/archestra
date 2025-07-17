@@ -9,7 +9,7 @@ import { Badge } from "./components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
 import { ScrollArea } from "./components/ui/scroll-area";
-import { CheckCircle, XCircle, MessageCircle, Bot } from "lucide-react";
+import { CheckCircle, XCircle, MessageCircle, Bot, Bug } from "lucide-react";
 import "./index.css";
 
 function App() {
@@ -24,17 +24,12 @@ function App() {
   const [mcpServers, setMcpServers] = useState<{
     [key: string]: { command: string; args: string[] };
   }>({});
-  const [currentServerName, setCurrentServerName] = useState("");
-  const [currentServerCommand, setCurrentServerCommand] = useState("env");
-  const [currentServerArgs, setCurrentServerArgs] = useState("");
-  const [jsonImport, setJsonImport] = useState("");
   const [mcpServerStatus, setMcpServerStatus] = useState<{
     [key: string]: string;
   }>({});
   const [mcpServerLoading, setMcpServerLoading] = useState<{
     [key: string]: boolean;
   }>({});
-  const [activeSection, setActiveSection] = useState<"none" | "import" | "add">("none");
   const [mcpTools, setMcpTools] = useState<
     Array<{
       serverName: string;
@@ -49,8 +44,10 @@ function App() {
     [key: string]: boolean;
   }>({});
   const [activeTab, setActiveTab] = useState<"chat" | "mcp">("chat");
+  const [debugInfo, setDebugInfo] = useState<string>("");
 
   const serverListRef = useRef<HTMLDivElement>(null);
+  const debugRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadMcpServersFromDb();
@@ -115,6 +112,69 @@ function App() {
     }
   }
 
+  async function autoStartMcpServers() {
+    console.log("Auto-starting MCP servers...");
+
+    // Start all configured MCP servers
+    for (const [serverName, config] of Object.entries(mcpServers)) {
+      try {
+        console.log(`Auto-starting MCP server: ${serverName}`);
+        await invoke("start_persistent_mcp_server", {
+          name: serverName,
+          command: config.command,
+          args: config.args,
+        });
+
+        setMcpServerStatus((prev) => ({
+          ...prev,
+          [serverName]: "Auto-started with persistent connection",
+        }));
+      } catch (error) {
+        console.error(`Failed to auto-start MCP server ${serverName}:`, error);
+        setMcpServerStatus((prev) => ({
+          ...prev,
+          [serverName]: `Auto-start failed: ${error}`,
+        }));
+      }
+    }
+
+    // Refresh tools and statuses after starting servers
+    setTimeout(() => {
+      loadMcpTools();
+      loadMcpServerStatuses();
+    }, 3000);
+  }
+
+  async function debugMcpBridge() {
+    try {
+      const debug = await invoke<string>("debug_mcp_bridge");
+      setDebugInfo(debug);
+
+      // Scroll to debug section after setting info
+      setTimeout(() => {
+        if (debugRef.current) {
+          debugRef.current.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+        }
+      }, 100);
+    } catch (error) {
+      console.error("Failed to debug MCP bridge:", error);
+      setDebugInfo(`Error: ${error}`);
+
+      // Still scroll to show the error
+      setTimeout(() => {
+        if (debugRef.current) {
+          debugRef.current.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          });
+        }
+      }, 100);
+    }
+  }
+
   async function runOllamaServe() {
     console.log("runOllamaServe called, isOllamaRunning:", isOllamaRunning);
 
@@ -131,9 +191,10 @@ function App() {
       setIsOllamaRunning(true);
       setOllamaStatus(`Ollama server started successfully on port ${port}`);
 
-      // Wait a moment for the server to start, then fetch available models
+      // Wait a moment for the server to start, then fetch available models and start MCP servers
       setTimeout(() => {
         fetchAvailableModels(port);
+        autoStartMcpServers();
       }, 2000);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : JSON.stringify(error);
@@ -280,182 +341,6 @@ function App() {
     setChatLoading(false);
   }
 
-  async function addMcpServer() {
-    if (!currentServerName.trim()) {
-      alert("Please enter a server name");
-      return;
-    }
-
-    const args = currentServerArgs.trim() ? currentServerArgs.split(" ").filter((arg) => arg.trim()) : [];
-
-    try {
-      await invoke("save_mcp_server", {
-        name: currentServerName,
-        command: currentServerCommand,
-        args: args,
-      });
-
-      setMcpServers((prev) => ({
-        ...prev,
-        [currentServerName]: {
-          command: currentServerCommand,
-          args: args,
-        },
-      }));
-
-      setCurrentServerName("");
-      setCurrentServerArgs("");
-      setActiveSection("none");
-
-      // Scroll to the server list to show the newly added server
-      setTimeout(() => {
-        if (serverListRef.current) {
-          serverListRef.current.scrollIntoView({
-            behavior: "smooth",
-            block: "nearest",
-          });
-        }
-      }, 100);
-    } catch (error) {
-      console.error("Failed to save MCP server:", error);
-      alert("Failed to save MCP server. Please try again.");
-    }
-  }
-
-  async function runMcpServer(serverName: string) {
-    setMcpServerLoading((prev) => ({ ...prev, [serverName]: true }));
-    setMcpServerStatus((prev) => ({
-      ...prev,
-      [serverName]: "Starting MCP server in sandbox...",
-    }));
-
-    try {
-      const server = mcpServers[serverName];
-      const result = await invoke("run_mcp_server_in_sandbox", {
-        serverName: serverName,
-        config: {
-          command: server.command,
-          args: server.args,
-        },
-      });
-
-      setMcpServerStatus((prev) => ({
-        ...prev,
-        [serverName]: `MCP server result: ${result}`,
-      }));
-
-      // Refresh MCP tools and server statuses after starting a server
-      setTimeout(() => {
-        loadMcpTools();
-        loadMcpServerStatuses();
-      }, 2000);
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : "An unknown error occurred";
-      setMcpServerStatus((prev) => ({
-        ...prev,
-        [serverName]: `Error: ${errorMsg}`,
-      }));
-    }
-
-    setMcpServerLoading((prev) => ({ ...prev, [serverName]: false }));
-  }
-
-  async function removeMcpServer(serverName: string) {
-    try {
-      await invoke("delete_mcp_server", { name: serverName });
-
-      setMcpServers((prev) => {
-        const newServers = { ...prev };
-        delete newServers[serverName];
-        return newServers;
-      });
-
-      setMcpServerStatus((prev) => {
-        const newStatus = { ...prev };
-        delete newStatus[serverName];
-        return newStatus;
-      });
-
-      setMcpServerLoading((prev) => {
-        const newLoading = { ...prev };
-        delete newLoading[serverName];
-        return newLoading;
-      });
-    } catch (error) {
-      console.error("Failed to delete MCP server:", error);
-      alert("Failed to delete MCP server. Please try again.");
-    }
-  }
-
-  async function importFromJson() {
-    try {
-      const parsed = JSON.parse(jsonImport);
-      let serversToImport: {
-        [key: string]: { command: string; args: string[] };
-      } = {};
-
-      if (parsed.mcpServers && typeof parsed.mcpServers === "object") {
-        serversToImport = parsed.mcpServers;
-      } else if (typeof parsed === "object") {
-        serversToImport = parsed;
-      } else {
-        throw new Error("Invalid JSON format");
-      }
-
-      const validServers: {
-        [key: string]: { command: string; args: string[] };
-      } = {};
-      Object.entries(serversToImport).forEach(([name, config]) => {
-        if (typeof config === "object" && "command" in config && "args" in config && Array.isArray(config.args)) {
-          validServers[name] = {
-            command: config.command,
-            args: config.args,
-          };
-        }
-      });
-
-      if (Object.keys(validServers).length > 0) {
-        try {
-          // Save each server to database
-          await Promise.all(
-            Object.entries(validServers).map(([name, config]) =>
-              invoke("save_mcp_server", {
-                name: name,
-                command: config.command,
-                args: config.args,
-              })
-            )
-          );
-
-          setMcpServers((prev) => ({
-            ...prev,
-            ...validServers,
-          }));
-          setJsonImport("");
-          setActiveSection("none");
-          alert(`Successfully imported ${Object.keys(validServers).length} server(s)!`);
-
-          // Scroll to the server list to show the newly imported servers
-          setTimeout(() => {
-            if (serverListRef.current) {
-              serverListRef.current.scrollIntoView({
-                behavior: "smooth",
-                block: "nearest",
-              });
-            }
-          }, 100);
-        } catch (saveError) {
-          console.error("Failed to save imported servers:", saveError);
-          alert("Failed to save imported servers. Please try again.");
-        }
-      } else {
-        alert("No valid servers found in the JSON");
-      }
-    } catch (error) {
-      alert(`Error importing JSON: ${error instanceof Error ? error.message : "Invalid JSON"}`);
-    }
-  }
-
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="container mx-auto px-4 py-8 max-w-6xl">
@@ -502,6 +387,10 @@ function App() {
                       Stop Ollama Server
                     </Button>
                   )}
+                  <Button onClick={debugMcpBridge} variant="outline" className="flex items-center gap-2">
+                    <Bug className="h-4 w-4" />
+                    Debug MCP Bridge
+                  </Button>
                 </div>
 
                 {ollamaStatus && (
@@ -615,6 +504,24 @@ function App() {
                 </form>
               </CardContent>
             </Card>
+
+            {debugInfo && (
+              <Card ref={debugRef}>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Bug className="h-5 w-5" />
+                    MCP Bridge Debug Info
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ScrollArea className="h-96 w-full">
+                    <pre className="text-sm font-mono whitespace-pre-wrap bg-slate-950 text-slate-50 p-4 rounded-md">
+                      {debugInfo}
+                    </pre>
+                  </ScrollArea>
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
 
           <TabsContent value="mcp">
@@ -625,6 +532,7 @@ function App() {
               setMcpServerStatus={setMcpServerStatus}
               mcpServerLoading={mcpServerLoading}
               setMcpServerLoading={setMcpServerLoading}
+              mcpServerStatuses={mcpServerStatuses}
             />
           </TabsContent>
         </Tabs>
