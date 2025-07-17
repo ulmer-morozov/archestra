@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import reactLogo from "./assets/react.svg";
 import { invoke } from "@tauri-apps/api/core";
-import { Command } from "@tauri-apps/plugin-shell";
+import { Command, Child } from "@tauri-apps/plugin-shell";
 import "./App.css";
 
 function App() {
@@ -11,6 +11,8 @@ function App() {
   const [name, setName] = useState("");
   const [sidecarPort, setSidecarPort] = useState<number | null>(null);
   const [ollamaStatus, setOllamaStatus] = useState("");
+  const [ollamaProcess, setOllamaProcess] = useState<Child | null>(null);
+  const [isOllamaRunning, setIsOllamaRunning] = useState(false);
   const [chatMessage, setChatMessage] = useState("");
   const [chatHistory, setChatHistory] = useState<
     { role: string; content: string }[]
@@ -55,7 +57,32 @@ function App() {
 
   useEffect(() => {
     invoke<number>("get_hello_server_port").then(setSidecarPort);
+
+    // Check if Ollama is already running
+    checkOllamaStatus();
   }, []);
+
+  async function checkOllamaStatus() {
+    console.log("checkOllamaStatus called");
+    try {
+      console.log("Fetching http://localhost:11434/api/tags");
+      const response = await fetch("http://localhost:11434/api/tags");
+      console.log("Response:", response.status, response.ok);
+      if (response.ok) {
+        setIsOllamaRunning(true);
+        setOllamaStatus("Ollama server is running");
+        console.log("Set status to running");
+      } else {
+        setIsOllamaRunning(false);
+        setOllamaStatus("Ollama server not running");
+        console.log("Set status to not running (bad response)");
+      }
+    } catch (error) {
+      setIsOllamaRunning(false);
+      setOllamaStatus("Ollama server not running");
+      console.error("Error checking Ollama status:", error);
+    }
+  }
 
   async function greetingFromNodeSidecarServer() {
     setLoading(true);
@@ -82,21 +109,86 @@ function App() {
   }
 
   async function runOllamaServe() {
+    console.log("runOllamaServe called, isOllamaRunning:", isOllamaRunning);
+
+    // Prevent multiple starts
+    if (isOllamaRunning) {
+      setOllamaStatus("Ollama server is already running");
+      return;
+    }
+
     try {
       setOllamaStatus("Starting Ollama server...");
+
+      // Kill any existing ollama processes first
+      try {
+        console.log("Killing any existing Ollama processes");
+        const killCommand = Command.create("pkill", ["-f", "ollama"]);
+        await killCommand.execute();
+        console.log("Cleanup kill command executed");
+      } catch (killError) {
+        console.log("Cleanup kill failed (normal if no processes):", killError);
+      }
+
       const command = Command.sidecar("binaries/ollama-darwin/ollama", [
         "serve",
       ]);
 
-      await command.spawn();
+      const child = await command.spawn();
+      setOllamaProcess(child);
+      setIsOllamaRunning(true);
       setOllamaStatus(
         "Ollama server started successfully (running in background)",
       );
-      
+      console.log("Ollama started successfully");
     } catch (error) {
       const errorMsg =
         error instanceof Error ? error.message : JSON.stringify(error);
       setOllamaStatus(`Error starting Ollama: ${errorMsg}`);
+      setIsOllamaRunning(false);
+      console.error("Error starting Ollama:", error);
+    }
+  }
+
+  async function stopOllamaServe() {
+    console.log("stopOllamaServe called, ollamaProcess:", ollamaProcess);
+    setOllamaStatus("Stopping Ollama server...");
+
+    try {
+      // First try to kill the tracked process
+      if (ollamaProcess) {
+        console.log("Calling kill on tracked process");
+        await ollamaProcess.kill();
+        console.log("Tracked process killed successfully");
+      }
+
+      // Also try to kill any Ollama processes using system command
+      try {
+        console.log("Killing any remaining Ollama processes");
+        const killCommand = Command.create("pkill", ["-f", "ollama"]);
+        await killCommand.execute();
+        console.log("System kill command executed");
+      } catch (killError) {
+        console.log(
+          "Kill command failed (might be normal if no processes):",
+          killError,
+        );
+      }
+
+      // Clear state
+      setOllamaProcess(null);
+      setIsOllamaRunning(false);
+      setOllamaStatus("Ollama server stopped");
+      console.log("Stop operation completed");
+    } catch (error) {
+      const errorMsg =
+        error instanceof Error ? error.message : JSON.stringify(error);
+      setOllamaStatus(`Error stopping Ollama: ${errorMsg}`);
+      console.error("Error stopping Ollama:", error);
+
+      // Even if there was an error, update the state
+      setOllamaProcess(null);
+      setIsOllamaRunning(false);
     }
   }
 
@@ -348,7 +440,14 @@ function App() {
       <div className="card">
         <h3>Ollama Local AI</h3>
         <div className="form-row">
-          <button onClick={runOllamaServe}>Start Ollama Server</button>
+          {!isOllamaRunning ? (
+            <button onClick={runOllamaServe}>Start Ollama Server</button>
+          ) : (
+            <button onClick={stopOllamaServe} className="button-danger">
+              Stop Ollama Server
+            </button>
+          )}
+          <button onClick={checkOllamaStatus}>Check Status</button>
         </div>
 
         {ollamaStatus && (

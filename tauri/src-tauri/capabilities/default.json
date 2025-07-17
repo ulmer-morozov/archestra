@@ -12,16 +12,15 @@
         {
           "name": "binaries/hello-server",
           "sidecar": true
-        }
-      ]
-    },
-    {
-      "identifier": "shell:allow-execute",
-      "allow": [
+        },
         {
           "name": "binaries/ollama-darwin/ollama",
           "sidecar": true,
           "args": ["serve"]
+        },
+        {
+          "name": "pkill",
+          "args": ["-f", "ollama"]
         }
       ]
     },
@@ -36,6 +35,7 @@
       ]
     },
     "shell:allow-open",
+    "shell:allow-kill",
     "shell:default"
   ]
 }
