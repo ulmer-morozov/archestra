@@ -82,7 +82,7 @@ async fn start_ollama_server(app_handle: tauri::AppHandle) -> Result<u16, String
     println!("Starting Ollama server as sidecar on port {}...", port);
 
     let sidecar_result = app_handle.shell()
-        .sidecar("ollama-darwin/ollama")
+        .sidecar("ollama")
         .unwrap()
         .args(&["serve", "--port", &port.to_string()])
         .spawn();
