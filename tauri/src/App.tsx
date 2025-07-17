@@ -102,12 +102,21 @@ function App() {
         body: JSON.stringify({
           model: selectedModel,
           prompt: currentMessage,
-          stream: true,
+          stream: false,
         }),
       });
 
-      const data = await response.json();
-      console.log("Ollama response:", data);
+      const responseText = await response.text();
+      console.log("Raw response:", responseText);
+
+      let data;
+      try {
+        data = JSON.parse(responseText);
+        console.log("Parsed response:", data);
+      } catch (parseError) {
+        console.error("Failed to parse response:", parseError);
+        throw new Error(`Failed to parse response: ${responseText}`);
+      }
 
       if (response.ok) {
         const aiMessage = { role: "assistant", content: data.response };
