@@ -233,6 +233,7 @@ for (server_name, tool) in available_tools {
 - Each MCP server runs as separate process
 - Communication only through controlled stdio channels
 - No direct memory sharing between processes
+- Async-safe process management using Tokio mutexes
 
 ## Health Monitoring
 
