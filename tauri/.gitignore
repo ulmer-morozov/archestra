@@ -21,6 +21,7 @@ dist-ssr
 CLAUDE.md
 
 # Database files
+mcp_servers.db
 src-tauri/mcp_servers.db
 src-tauri/mcp_servers.db-shm
 src-tauri/mcp_servers.db-wal
