@@ -180,7 +180,7 @@ function App() {
 
     try {
       const server = mcpServers[serverName];
-      const result = await invoke("run_mcp_server_in_sandbox", {
+      const result = await invoke("start_mcp_server_in_sandbox", {
         serverName: serverName,
         config: {
           command: server.command,
