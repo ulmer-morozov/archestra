@@ -6,6 +6,8 @@ function App() {
   const [ollamaPort, setOllamaPort] = useState<number | null>(null);
   const [ollamaStatus, setOllamaStatus] = useState("");
   const [chatMessage, setChatMessage] = useState("");
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [chatHistory, setChatHistory] = useState<
     { role: string; content: string }[]
   >([]);
@@ -54,10 +56,33 @@ function App() {
       const port = await invoke<number>("start_ollama_server");
       setOllamaPort(port);
       setOllamaStatus(`Ollama server started successfully on port ${port}`);
+
+      // Wait a moment for the server to start, then fetch available models
+      setTimeout(() => {
+        fetchAvailableModels(port);
+      }, 2000);
     } catch (error) {
       const errorMsg =
         error instanceof Error ? error.message : JSON.stringify(error);
       setOllamaStatus(`Error starting Ollama: ${errorMsg}`);
+    }
+  }
+
+  async function fetchAvailableModels(port: number) {
+    try {
+      const response = await fetch(`http://localhost:${port}/api/tags`);
+      if (response.ok) {
+        const data = await response.json();
+        const models = data.models?.map((model: any) => model.name) || [];
+
+        setAvailableModels(models);
+
+        if (models.length > 0 && !selectedModel) {
+          setSelectedModel(models[0]);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to fetch models:", error);
     }
   }
 
@@ -67,6 +92,7 @@ function App() {
     setChatLoading(true);
     const userMessage = { role: "user", content: chatMessage };
     setChatHistory((prev) => [...prev, userMessage]);
+    const currentMessage = chatMessage;
     setChatMessage("");
 
     try {
@@ -74,13 +100,14 @@ function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "llama3.2",
-          prompt: chatMessage,
-          stream: false,
+          model: selectedModel,
+          prompt: currentMessage,
+          stream: true,
         }),
       });
 
       const data = await response.json();
+      console.log("Ollama response:", data);
 
       if (response.ok) {
         const aiMessage = { role: "assistant", content: data.response };
@@ -88,7 +115,7 @@ function App() {
       } else {
         const errorMessage = {
           role: "error",
-          content: `Error: ${response.status} - ${response.statusText}`,
+          content: `Error: ${response.status} - ${response.statusText} - ${JSON.stringify(data)}`,
         };
         setChatHistory((prev) => [...prev, errorMessage]);
       }
@@ -294,6 +321,21 @@ function App() {
 
       <div className="card">
         <h3>Chat with Ollama</h3>
+        {ollamaPort && availableModels.length > 0 && (
+          <div className="form-row">
+            <label>Model:</label>
+            <select
+              value={selectedModel || ""}
+              onChange={(e) => setSelectedModel(e.target.value)}
+            >
+              {availableModels.map((model) => (
+                <option key={model} value={model}>
+                  {model}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="chat-history">
           {chatHistory.map((msg, index) => (
             <div key={index} className={`chat-message ${msg.role}`}>
