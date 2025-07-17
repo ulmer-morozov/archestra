@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
 
@@ -15,25 +15,7 @@ function App() {
   const [chatLoading, setChatLoading] = useState(false);
   const [mcpServers, setMcpServers] = useState<{
     [key: string]: { command: string; args: string[] };
-  }>({
-    github: {
-      command: "env",
-      args: [
-        "GITHUB_PERSONAL_ACCESS_TOKEN=ghp_my_token",
-        "npx",
-        "-y",
-        "@modelcontextprotocol/server-github",
-      ],
-    },
-    "browser-tools": {
-      command: "npx",
-      args: ["@agentdeskai/browser-tools-mcp"],
-    },
-    context7: {
-      command: "npx",
-      args: ["-y", "@upstash/context7-mcp"],
-    },
-  });
+  }>({});
   const [currentServerName, setCurrentServerName] = useState("");
   const [currentServerCommand, setCurrentServerCommand] = useState("env");
   const [currentServerArgs, setCurrentServerArgs] = useState("");
@@ -49,6 +31,21 @@ function App() {
   );
 
   const serverListRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    loadMcpServersFromDb();
+  }, []);
+
+  async function loadMcpServersFromDb() {
+    try {
+      const servers = await invoke<{
+        [key: string]: { command: string; args: string[] };
+      }>("load_mcp_servers");
+      setMcpServers(servers);
+    } catch (error) {
+      console.error("Failed to load MCP servers:", error);
+    }
+  }
 
 
   async function runOllamaServe() {
@@ -178,27 +175,38 @@ function App() {
       ? currentServerArgs.split(" ").filter((arg) => arg.trim())
       : [];
 
-    setMcpServers((prev) => ({
-      ...prev,
-      [currentServerName]: {
+    try {
+      await invoke("save_mcp_server", {
+        name: currentServerName,
         command: currentServerCommand,
         args: args,
-      },
-    }));
+      });
 
-    setCurrentServerName("");
-    setCurrentServerArgs("");
-    setActiveSection("none");
+      setMcpServers((prev) => ({
+        ...prev,
+        [currentServerName]: {
+          command: currentServerCommand,
+          args: args,
+        },
+      }));
 
-    // Scroll to the server list to show the newly added server
-    setTimeout(() => {
-      if (serverListRef.current) {
-        serverListRef.current.scrollIntoView({
-          behavior: "smooth",
-          block: "nearest",
-        });
-      }
-    }, 100);
+      setCurrentServerName("");
+      setCurrentServerArgs("");
+      setActiveSection("none");
+
+      // Scroll to the server list to show the newly added server
+      setTimeout(() => {
+        if (serverListRef.current) {
+          serverListRef.current.scrollIntoView({
+            behavior: "smooth",
+            block: "nearest",
+          });
+        }
+      }, 100);
+    } catch (error) {
+      console.error("Failed to save MCP server:", error);
+      alert("Failed to save MCP server. Please try again.");
+    }
   }
 
   async function runMcpServer(serverName: string) {
@@ -235,26 +243,33 @@ function App() {
   }
 
   async function removeMcpServer(serverName: string) {
-    setMcpServers((prev) => {
-      const newServers = { ...prev };
-      delete newServers[serverName];
-      return newServers;
-    });
+    try {
+      await invoke("delete_mcp_server", { name: serverName });
 
-    setMcpServerStatus((prev) => {
-      const newStatus = { ...prev };
-      delete newStatus[serverName];
-      return newStatus;
-    });
+      setMcpServers((prev) => {
+        const newServers = { ...prev };
+        delete newServers[serverName];
+        return newServers;
+      });
 
-    setMcpServerLoading((prev) => {
-      const newLoading = { ...prev };
-      delete newLoading[serverName];
-      return newLoading;
-    });
+      setMcpServerStatus((prev) => {
+        const newStatus = { ...prev };
+        delete newStatus[serverName];
+        return newStatus;
+      });
+
+      setMcpServerLoading((prev) => {
+        const newLoading = { ...prev };
+        delete newLoading[serverName];
+        return newLoading;
+      });
+    } catch (error) {
+      console.error("Failed to delete MCP server:", error);
+      alert("Failed to delete MCP server. Please try again.");
+    }
   }
 
-  function importFromJson() {
+  async function importFromJson() {
     try {
       const parsed = JSON.parse(jsonImport);
       let serversToImport: {
@@ -287,27 +302,43 @@ function App() {
       });
 
       if (Object.keys(validServers).length > 0) {
-        setMcpServers((prev) => ({
-          ...prev,
-          ...validServers,
-        }));
-        setJsonImport("");
-        setActiveSection("none");
-        alert(
-          `Successfully imported ${
-            Object.keys(validServers).length
-          } server(s)!`,
-        );
+        try {
+          // Save each server to database
+          await Promise.all(
+            Object.entries(validServers).map(([name, config]) =>
+              invoke("save_mcp_server", {
+                name: name,
+                command: config.command,
+                args: config.args,
+              })
+            )
+          );
 
-        // Scroll to the server list to show the newly imported servers
-        setTimeout(() => {
-          if (serverListRef.current) {
-            serverListRef.current.scrollIntoView({
-              behavior: "smooth",
-              block: "nearest",
-            });
-          }
-        }, 100);
+          setMcpServers((prev) => ({
+            ...prev,
+            ...validServers,
+          }));
+          setJsonImport("");
+          setActiveSection("none");
+          alert(
+            `Successfully imported ${
+              Object.keys(validServers).length
+            } server(s)!`,
+          );
+
+          // Scroll to the server list to show the newly imported servers
+          setTimeout(() => {
+            if (serverListRef.current) {
+              serverListRef.current.scrollIntoView({
+                behavior: "smooth",
+                block: "nearest",
+              });
+            }
+          }, 100);
+        } catch (saveError) {
+          console.error("Failed to save imported servers:", saveError);
+          alert("Failed to save imported servers. Please try again.");
+        }
       } else {
         alert("No valid servers found in the JSON");
       }

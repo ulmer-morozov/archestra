@@ -3,6 +3,9 @@ use tauri_plugin_shell;
 use tauri_plugin_shell::ShellExt;
 use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
+use rusqlite::{Connection, Result};
+use std::path::Path;
+use tauri::Manager;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct McpServerDefinition {
@@ -154,9 +157,91 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![run_mcp_server_in_sandbox, start_ollama_server, stop_ollama_server])
+        .invoke_handler(tauri::generate_handler![run_mcp_server_in_sandbox, start_ollama_server, stop_ollama_server, save_mcp_server, load_mcp_servers, delete_mcp_server])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
 
 pub struct PortState(pub Mutex<u16>);
+
+fn init_database(data_dir: &Path) -> Result<Connection> {
+    let db_path = data_dir.join("mcp_servers.db");
+    let conn = Connection::open(db_path)?;
+    
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS mcp_servers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            command TEXT NOT NULL,
+            args TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )",
+        [],
+    )?;
+    
+    Ok(conn)
+}
+
+#[tauri::command]
+async fn save_mcp_server(app: tauri::AppHandle, name: String, command: String, args: Vec<String>) -> Result<(), String> {
+    let data_dir = app.path().app_data_dir().map_err(|e| format!("Failed to get data dir: {}", e))?;
+    std::fs::create_dir_all(&data_dir).map_err(|e| format!("Failed to create data dir: {}", e))?;
+    
+    let conn = init_database(&data_dir).map_err(|e| format!("Database error: {}", e))?;
+    
+    let args_json = serde_json::to_string(&args).map_err(|e| format!("Failed to serialize args: {}", e))?;
+    
+    conn.execute(
+        "INSERT OR REPLACE INTO mcp_servers (name, command, args) VALUES (?1, ?2, ?3)",
+        [&name, &command, &args_json],
+    ).map_err(|e| format!("Failed to save server: {}", e))?;
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn load_mcp_servers(app: tauri::AppHandle) -> Result<std::collections::HashMap<String, McpServerDefinition>, String> {
+    let data_dir = app.path().app_data_dir().map_err(|e| format!("Failed to get data dir: {}", e))?;
+    
+    if !data_dir.exists() {
+        return Ok(std::collections::HashMap::new());
+    }
+    
+    let conn = init_database(&data_dir).map_err(|e| format!("Database error: {}", e))?;
+    
+    let mut stmt = conn.prepare("SELECT name, command, args FROM mcp_servers").map_err(|e| format!("Failed to prepare statement: {}", e))?;
+    
+    let server_iter = stmt.query_map([], |row| {
+        let name: String = row.get(0)?;
+        let command: String = row.get(1)?;
+        let args_json: String = row.get(2)?;
+        
+        let args: Vec<String> = serde_json::from_str(&args_json).map_err(|_| rusqlite::Error::InvalidColumnType(2, "args".to_string(), rusqlite::types::Type::Text))?;
+        
+        Ok((name, McpServerDefinition { command, args }))
+    }).map_err(|e| format!("Failed to query servers: {}", e))?;
+    
+    let mut servers = std::collections::HashMap::new();
+    for server_result in server_iter {
+        let (name, definition) = server_result.map_err(|e| format!("Failed to parse server: {}", e))?;
+        servers.insert(name, definition);
+    }
+    
+    Ok(servers)
+}
+
+#[tauri::command]
+async fn delete_mcp_server(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    let data_dir = app.path().app_data_dir().map_err(|e| format!("Failed to get data dir: {}", e))?;
+    
+    if !data_dir.exists() {
+        return Ok(());
+    }
+    
+    let conn = init_database(&data_dir).map_err(|e| format!("Database error: {}", e))?;
+    
+    conn.execute("DELETE FROM mcp_servers WHERE name = ?1", [&name])
+        .map_err(|e| format!("Failed to delete server: {}", e))?;
+    
+    Ok(())
+}
