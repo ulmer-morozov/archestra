@@ -84,7 +84,8 @@ async fn start_ollama_server(app_handle: tauri::AppHandle) -> Result<u16, String
     let sidecar_result = app_handle.shell()
         .sidecar("ollama")
         .unwrap()
-        .args(&["serve", "--port", &port.to_string()])
+        .env("OLLAMA_HOST", format!("127.0.0.1:{}", port))
+        .args(&["serve"])
         .spawn();
 
     match sidecar_result {
