@@ -1,15 +1,9 @@
-import { useState, useEffect } from "react";
-import reactLogo from "./assets/react.svg";
+import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Command } from "@tauri-apps/plugin-shell";
 import "./App.css";
 
 function App() {
-  const [greetingMessage, setGreetingMessage] = useState("");
-  const [greetingMessageError, setGreetingMessageError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [name, setName] = useState("");
-  const [sidecarPort, setSidecarPort] = useState<number | null>(null);
+  const [ollamaPort, setOllamaPort] = useState<number | null>(null);
   const [ollamaStatus, setOllamaStatus] = useState("");
   const [chatMessage, setChatMessage] = useState("");
   const [chatHistory, setChatHistory] = useState<
@@ -48,51 +42,13 @@ function App() {
     [key: string]: boolean;
   }>({});
 
-  useEffect(() => {
-    invoke<number>("get_hello_server_port").then(setSidecarPort);
-  }, []);
-
-  async function greetingFromNodeSidecarServer() {
-    setLoading(true);
-    setGreetingMessage("");
-    setGreetingMessageError("");
-    try {
-      const response = await fetch(`http://localhost:${sidecarPort}/echo`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ value: name }),
-      });
-      const data = await response.json();
-      if (response.ok) {
-        setGreetingMessage(data.message);
-      } else {
-        setGreetingMessageError(data.message);
-      }
-    } catch (error) {
-      setGreetingMessageError(
-        error instanceof Error ? error.message : "An unknown error occurred",
-      );
-    }
-    setLoading(false);
-  }
 
   async function runOllamaServe() {
     try {
       setOllamaStatus("Starting Ollama server...");
-      const command = Command.sidecar("binaries/ollama-darwin/ollama", [
-        "serve",
-      ]);
-      const output = await command.execute();
-
-      if (output.code === 0) {
-        setOllamaStatus(
-          `Ollama server started successfully. stdout: ${output.stdout}`,
-        );
-      } else {
-        setOllamaStatus(
-          `Ollama server failed with code ${output.code}. stderr: ${output.stderr}, stdout: ${output.stdout}`,
-        );
-      }
+      const port = await invoke<number>("start_ollama_server");
+      setOllamaPort(port);
+      setOllamaStatus(`Ollama server started successfully on port ${port}`);
     } catch (error) {
       const errorMsg =
         error instanceof Error ? error.message : JSON.stringify(error);
@@ -101,7 +57,7 @@ function App() {
   }
 
   async function sendChatMessage() {
-    if (!chatMessage.trim()) return;
+    if (!chatMessage.trim() || !ollamaPort) return;
 
     setChatLoading(true);
     const userMessage = { role: "user", content: chatMessage };
@@ -109,7 +65,7 @@ function App() {
     setChatMessage("");
 
     try {
-      const response = await fetch("http://localhost:11434/api/generate", {
+      const response = await fetch(`http://localhost:${ollamaPort}/api/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -274,54 +230,14 @@ function App() {
   return (
     <main className="container">
       <div className="header">
-        <h1>Tauri + React Prototype</h1>
+        <h1>archestra.ai</h1>
         <div className="logo-row">
           <a href="https://vitejs.dev" target="_blank">
             <img src="/vite.svg" className="logo vite" alt="Vite logo" />
           </a>
-          <a href="https://tauri.app" target="_blank">
-            <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-          </a>
-          <a href="https://reactjs.org" target="_blank">
-            <img src={reactLogo} className="logo react" alt="React logo" />
-          </a>
         </div>
       </div>
 
-      <div className="card">
-        <h3>Node.js Sidecar Server</h3>
-        <form
-          className="form-row"
-          onSubmit={(e) => {
-            e.preventDefault();
-            greetingFromNodeSidecarServer();
-          }}
-        >
-          <input
-            value={name}
-            onChange={(e) => setName(e.currentTarget.value)}
-            placeholder="Enter your name..."
-            style={{ flex: 1 }}
-          />
-          <button type="submit" disabled={loading || sidecarPort === null}>
-            {loading ? "Loading..." : "Greet"}
-          </button>
-        </form>
-
-        <div className="status-text">Port: {sidecarPort ?? "loading..."}</div>
-
-        {greetingMessage && (
-          <div className="status-text status-success">
-            Response: {greetingMessage}
-          </div>
-        )}
-
-        {greetingMessageError && (
-          <div className="status-text status-error">
-            Error: {greetingMessageError}
-          </div>
-        )}
-      </div>
 
       <div className="card">
         <h3>Ollama Local AI</h3>
@@ -340,6 +256,11 @@ function App() {
             }`}
           >
             {ollamaStatus}
+          </div>
+        )}
+        {ollamaPort && (
+          <div className="status-text status-success">
+            Ollama running on port: {ollamaPort}
           </div>
         )}
       </div>
@@ -364,11 +285,11 @@ function App() {
           <input
             value={chatMessage}
             onChange={(e) => setChatMessage(e.target.value)}
-            placeholder="Type your message..."
-            disabled={chatLoading}
+            placeholder={ollamaPort ? "Type your message..." : "Start Ollama server first..."}
+            disabled={chatLoading || !ollamaPort}
             style={{ flex: 1 }}
           />
-          <button type="submit" disabled={chatLoading || !chatMessage.trim()}>
+          <button type="submit" disabled={chatLoading || !chatMessage.trim() || !ollamaPort}>
             {chatLoading ? "Sending..." : "Send"}
           </button>
         </form>

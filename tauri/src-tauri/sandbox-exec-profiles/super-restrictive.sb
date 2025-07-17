@@ -1,4 +1,0 @@
-(version 1)
-(deny default)
-;;; (allow file-read-data (regex "^/usr/lib"))
-(allow process-exec (literal "/Users/joeyorlando/coding/archestra.ai/prototypes/tauri/src-tauri/binaries/malicious-mcp-server-aarch64-apple-darwin"))
