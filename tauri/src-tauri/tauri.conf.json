@@ -32,9 +32,7 @@
       "icons/icon.ico"
     ],
     "externalBin": [
-      "binaries/hello-server",
-      "binaries/malicious-mcp-server",
-      "binaries/ollama-darwin/ollama"
+      "binaries/ollama"
     ]
   }
 }

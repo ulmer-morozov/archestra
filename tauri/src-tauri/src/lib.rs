@@ -1,16 +1,8 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 use tauri_plugin_shell;
 use tauri_plugin_shell::ShellExt;
-use tauri::Manager;
 use std::sync::Mutex;
-use tauri::State;
 use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct McpServerConfig {
-    pub package_name: String,
-    pub args: Vec<String>,
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct McpServerDefinition {
@@ -21,16 +13,6 @@ pub struct McpServerDefinition {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct McpServersConfig {
     pub mcp_servers: std::collections::HashMap<String, McpServerDefinition>,
-}
-
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
-#[tauri::command]
-fn get_hello_server_port(state: State<PortState>) -> u16 {
-    *state.0.lock().unwrap()
 }
 
 #[tauri::command]
@@ -92,6 +74,62 @@ async fn run_mcp_server_in_sandbox(
     }
 }
 
+#[tauri::command]
+async fn start_ollama_server(app_handle: tauri::AppHandle) -> Result<u16, String> {
+    use tauri_plugin_shell::process::CommandEvent;
+
+    let port = get_free_port();
+    println!("Starting Ollama server as sidecar on port {}...", port);
+
+    let sidecar_result = app_handle.shell()
+        .sidecar("ollama")
+        .unwrap()
+        .args(&["serve", "--port", &port.to_string()])
+        .spawn();
+
+    match sidecar_result {
+        Ok((mut rx, _child)) => {
+            println!("Ollama server started successfully on port {}!", port);
+
+            // Handle output in background
+            tauri::async_runtime::spawn(async move {
+                while let Some(event) = rx.recv().await {
+                    match event {
+                        CommandEvent::Stdout(line_bytes) => {
+                            let line = String::from_utf8_lossy(&line_bytes);
+                            print!("[Ollama stdout] {}", line);
+                        }
+                        CommandEvent::Stderr(line_bytes) => {
+                            let line = String::from_utf8_lossy(&line_bytes);
+                            eprint!("[Ollama stderr] {}", line);
+                        }
+                        _ => {}
+                    }
+                }
+            });
+
+            Ok(port)
+        }
+        Err(e) => {
+            let error_msg = format!("Failed to start Ollama server: {:?}", e);
+            eprintln!("{}", error_msg);
+            Err(error_msg)
+        }
+    }
+}
+
+#[tauri::command]
+async fn stop_ollama_server() -> Result<(), String> {
+    println!("Stopping Ollama server...");
+    
+    std::process::Command::new("pkill")
+        .args(&["-f", "ollama"])
+        .output()
+        .map_err(|e| format!("Failed to stop Ollama: {}", e))?;
+    
+    println!("Ollama server stopped");
+    Ok(())
+}
 
 fn get_free_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0")
@@ -101,109 +139,21 @@ fn get_free_port() -> u16 {
         .port()
 }
 
-async fn start_hello_server(app_handle: tauri::AppHandle, port: u16) {
-    use tauri_plugin_shell::process::CommandEvent;
-    println!("Ayo, hello-server will use port: {}", port);
-    let sidecar_result = app_handle.shell()
-        .sidecar("hello-server")
-        .unwrap()
-        .args(&[port.to_string()])
-        .spawn();
-    match sidecar_result {
-        Ok((mut rx, _child)) => {
-            println!("Ayo, hello-server sidecar started up nice and smooth!");
-            while let Some(event) = rx.recv().await {
-                match event {
-                    CommandEvent::Stdout(line_bytes) => {
-                        let line = String::from_utf8_lossy(&line_bytes);
-                        print!("[hello-server stdout] {}", line);
-                    }
-                    CommandEvent::Stderr(line_bytes) => {
-                        let line = String::from_utf8_lossy(&line_bytes);
-                        eprint!("[hello-server stderr] {}", line);
-                    }
-                    _ => {}
-                }
-            }
-        }
-        Err(e) => {
-            eprintln!("Madone! Failed to spawn hello-server sidecar: {:?}", e);
-        }
-    }
-}
-
-async fn start_malicious_mcp_server() {
-    use std::process::Stdio;
-    use tokio::io::{AsyncBufReadExt, BufReader};
-    use tokio::process::Command as TokioCommand;
-
-    let arch = std::env::consts::ARCH; // "aarch64" or "x86_64"
-    let os = std::env::consts::OS;     // "macos"
-    let platform = if os == "macos" {
-        format!("{}-apple-darwin", arch)
-    } else {
-        format!("{}-{}", arch, os)
-    };
-    let binary_name = format!("malicious-mcp-server-{}", platform);
-    let binary_path = std::path::Path::new("binaries").join(&binary_name);
-
-    let mut child = TokioCommand::new("sandbox-exec")
-        // NOTE: allow-everything.sb is a profile that will allow that script to work
-        // and print out the ssh key
-        // .arg("-f").arg("./sandbox-exec-profiles/allow-everything.sb")
-        .arg("-f").arg("./sandbox-exec-profiles/super-restrictive.sb")
-        .arg(binary_path)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("failed to spawn sandbox-exec");
-
-    println!("Ayo, malicious-mcp-server (sandboxed) started up, fuggedaboutit!");
-
-    if let Some(stdout) = child.stdout.take() {
-        let mut reader = BufReader::new(stdout).lines();
-        tauri::async_runtime::spawn(async move {
-            while let Ok(Some(line)) = reader.next_line().await {
-                print!("[malicious-mcp-server (sandboxed) stdout] {}\n", line);
-            }
-        });
-    }
-    if let Some(stderr) = child.stderr.take() {
-        let mut reader = BufReader::new(stderr).lines();
-        tauri::async_runtime::spawn(async move {
-            while let Ok(Some(line)) = reader.next_line().await {
-                eprint!("[malicious-mcp-server (sandboxed) stderr] {}\n", line);
-            }
-        });
-    }
-    let _ = child.wait().await;
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
-        .setup(|app| {
+        .setup(|_app| {
+            // NOTE: can use this portion to start sidecars when the app launches
             // Start the node.js express-server sidecar when the app launches
-            let app_handle = app.handle().clone();
-            let port = get_free_port();
-            app.manage(PortState(Mutex::new(port)));
-
-            // Start hello-server
-            let app_handle_clone = app_handle.clone();
-            tauri::async_runtime::spawn(async move {
-                start_hello_server(app_handle_clone, port).await;
-            });
-
-            // Start malicious-mcp-server
-            tauri::async_runtime::spawn(async move {
-                start_malicious_mcp_server().await;
-            });
+            // let app_handle = app.handle().clone();
+            // let port = get_free_port();
+            // app.manage(PortState(Mutex::new(port)));
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![greet, get_hello_server_port, run_mcp_server_in_sandbox])
+        .invoke_handler(tauri::generate_handler![run_mcp_server_in_sandbox, start_ollama_server, stop_ollama_server])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

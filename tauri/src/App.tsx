@@ -1,17 +1,10 @@
-import { useState, useEffect, useRef } from "react";
-import reactLogo from "./assets/react.svg";
+import { useState, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Command, Child } from "@tauri-apps/plugin-shell";
 import "./App.css";
 
 function App() {
-  const [greetingMessage, setGreetingMessage] = useState("");
-  const [greetingMessageError, setGreetingMessageError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [name, setName] = useState("");
-  const [sidecarPort, setSidecarPort] = useState<number | null>(null);
+  const [ollamaPort, setOllamaPort] = useState<number | null>(null);
   const [ollamaStatus, setOllamaStatus] = useState("");
-  const [ollamaProcess, setOllamaProcess] = useState<Child | null>(null);
   const [isOllamaRunning, setIsOllamaRunning] = useState(false);
   const [chatMessage, setChatMessage] = useState("");
   const [chatHistory, setChatHistory] = useState<
@@ -55,58 +48,6 @@ function App() {
 
   const serverListRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    invoke<number>("get_hello_server_port").then(setSidecarPort);
-
-    // Check if Ollama is already running
-    checkOllamaStatus();
-  }, []);
-
-  async function checkOllamaStatus() {
-    console.log("checkOllamaStatus called");
-    try {
-      console.log("Fetching http://localhost:11434/api/tags");
-      const response = await fetch("http://localhost:11434/api/tags");
-      console.log("Response:", response.status, response.ok);
-      if (response.ok) {
-        setIsOllamaRunning(true);
-        setOllamaStatus("Ollama server is running");
-        console.log("Set status to running");
-      } else {
-        setIsOllamaRunning(false);
-        setOllamaStatus("Ollama server not running");
-        console.log("Set status to not running (bad response)");
-      }
-    } catch (error) {
-      setIsOllamaRunning(false);
-      setOllamaStatus("Ollama server not running");
-      console.error("Error checking Ollama status:", error);
-    }
-  }
-
-  async function greetingFromNodeSidecarServer() {
-    setLoading(true);
-    setGreetingMessage("");
-    setGreetingMessageError("");
-    try {
-      const response = await fetch(`http://localhost:${sidecarPort}/echo`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ value: name }),
-      });
-      const data = await response.json();
-      if (response.ok) {
-        setGreetingMessage(data.message);
-      } else {
-        setGreetingMessageError(data.message);
-      }
-    } catch (error) {
-      setGreetingMessageError(
-        error instanceof Error ? error.message : "An unknown error occurred",
-      );
-    }
-    setLoading(false);
-  }
 
   async function runOllamaServe() {
     console.log("runOllamaServe called, isOllamaRunning:", isOllamaRunning);
@@ -119,28 +60,10 @@ function App() {
 
     try {
       setOllamaStatus("Starting Ollama server...");
-
-      // Kill any existing ollama processes first
-      try {
-        console.log("Killing any existing Ollama processes");
-        const killCommand = Command.create("pkill", ["-f", "ollama"]);
-        await killCommand.execute();
-        console.log("Cleanup kill command executed");
-      } catch (killError) {
-        console.log("Cleanup kill failed (normal if no processes):", killError);
-      }
-
-      const command = Command.sidecar("binaries/ollama-darwin/ollama", [
-        "serve",
-      ]);
-
-      const child = await command.spawn();
-      setOllamaProcess(child);
+      const port = await invoke<number>("start_ollama_server");
+      setOllamaPort(port);
       setIsOllamaRunning(true);
-      setOllamaStatus(
-        "Ollama server started successfully (running in background)",
-      );
-      console.log("Ollama started successfully");
+      setOllamaStatus(`Ollama server started successfully on port ${port}`);
     } catch (error) {
       const errorMsg =
         error instanceof Error ? error.message : JSON.stringify(error);
@@ -151,49 +74,25 @@ function App() {
   }
 
   async function stopOllamaServe() {
-    console.log("stopOllamaServe called, ollamaProcess:", ollamaProcess);
     setOllamaStatus("Stopping Ollama server...");
 
     try {
-      // First try to kill the tracked process
-      if (ollamaProcess) {
-        console.log("Calling kill on tracked process");
-        await ollamaProcess.kill();
-        console.log("Tracked process killed successfully");
-      }
-
-      // Also try to kill any Ollama processes using system command
-      try {
-        console.log("Killing any remaining Ollama processes");
-        const killCommand = Command.create("pkill", ["-f", "ollama"]);
-        await killCommand.execute();
-        console.log("System kill command executed");
-      } catch (killError) {
-        console.log(
-          "Kill command failed (might be normal if no processes):",
-          killError,
-        );
-      }
-
-      // Clear state
-      setOllamaProcess(null);
+      await invoke("stop_ollama_server");
       setIsOllamaRunning(false);
+      setOllamaPort(null);
       setOllamaStatus("Ollama server stopped");
-      console.log("Stop operation completed");
     } catch (error) {
       const errorMsg =
         error instanceof Error ? error.message : JSON.stringify(error);
       setOllamaStatus(`Error stopping Ollama: ${errorMsg}`);
       console.error("Error stopping Ollama:", error);
-
-      // Even if there was an error, update the state
-      setOllamaProcess(null);
       setIsOllamaRunning(false);
+      setOllamaPort(null);
     }
   }
 
   async function sendChatMessage() {
-    if (!chatMessage.trim()) return;
+    if (!chatMessage.trim() || !ollamaPort) return;
 
     setChatLoading(true);
     const userMessage = { role: "user", content: chatMessage };
@@ -201,7 +100,7 @@ function App() {
     setChatMessage("");
 
     try {
-      const response = await fetch("http://localhost:11434/api/generate", {
+      const response = await fetch(`http://localhost:${ollamaPort}/api/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -388,54 +287,14 @@ function App() {
   return (
     <main className="container">
       <div className="header">
-        <h1>Tauri + React Prototype</h1>
+        <h1>archestra.ai</h1>
         <div className="logo-row">
           <a href="https://vitejs.dev" target="_blank">
             <img src="/vite.svg" className="logo vite" alt="Vite logo" />
           </a>
-          <a href="https://tauri.app" target="_blank">
-            <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-          </a>
-          <a href="https://reactjs.org" target="_blank">
-            <img src={reactLogo} className="logo react" alt="React logo" />
-          </a>
         </div>
       </div>
 
-      <div className="card">
-        <h3>Node.js Sidecar Server</h3>
-        <form
-          className="form-row"
-          onSubmit={(e) => {
-            e.preventDefault();
-            greetingFromNodeSidecarServer();
-          }}
-        >
-          <input
-            value={name}
-            onChange={(e) => setName(e.currentTarget.value)}
-            placeholder="Enter your name..."
-            style={{ flex: 1 }}
-          />
-          <button type="submit" disabled={loading || sidecarPort === null}>
-            {loading ? "Loading..." : "Greet"}
-          </button>
-        </form>
-
-        <div className="status-text">Port: {sidecarPort ?? "loading..."}</div>
-
-        {greetingMessage && (
-          <div className="status-text status-success">
-            Response: {greetingMessage}
-          </div>
-        )}
-
-        {greetingMessageError && (
-          <div className="status-text status-error">
-            Error: {greetingMessageError}
-          </div>
-        )}
-      </div>
 
       <div className="card">
         <h3>Ollama Local AI</h3>
@@ -447,7 +306,6 @@ function App() {
               Stop Ollama Server
             </button>
           )}
-          <button onClick={checkOllamaStatus}>Check Status</button>
         </div>
 
         {ollamaStatus && (
@@ -461,6 +319,11 @@ function App() {
             }`}
           >
             {ollamaStatus}
+          </div>
+        )}
+        {ollamaPort && (
+          <div className="status-text status-success">
+            Ollama running on port: {ollamaPort}
           </div>
         )}
       </div>
@@ -485,11 +348,11 @@ function App() {
           <input
             value={chatMessage}
             onChange={(e) => setChatMessage(e.target.value)}
-            placeholder="Type your message..."
-            disabled={chatLoading}
+            placeholder={ollamaPort ? "Type your message..." : "Start Ollama server first..."}
+            disabled={chatLoading || !ollamaPort}
             style={{ flex: 1 }}
           />
-          <button type="submit" disabled={chatLoading || !chatMessage.trim()}>
+          <button type="submit" disabled={chatLoading || !chatMessage.trim() || !ollamaPort}>
             {chatLoading ? "Sending..." : "Send"}
           </button>
         </form>

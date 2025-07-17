@@ -10,27 +10,13 @@
       "identifier": "shell:allow-execute",
       "allow": [
         {
-          "name": "binaries/hello-server",
-          "sidecar": true
-        },
-        {
-          "name": "binaries/ollama-darwin/ollama",
+          "name": "binaries/ollama",
           "sidecar": true,
           "args": ["serve"]
         },
         {
           "name": "pkill",
           "args": ["-f", "ollama"]
-        }
-      ]
-    },
-    {
-      "identifier": "shell:allow-spawn",
-      "allow": [
-        {
-          "name": "binaries/ollama-darwin/ollama",
-          "sidecar": true,
-          "args": ["serve"]
         }
       ]
     },
