@@ -130,6 +130,7 @@ button {
   font-family: inherit;
   transition: all 0.2s ease;
   outline: none;
+  box-sizing: border-box;
 }
 
 input,
@@ -314,10 +315,11 @@ button:disabled {
 
 .import-textarea {
   width: 100%;
-  min-height: 120px;
+  min-height: 140px;
   font-family: 'Consolas', 'Monaco', monospace;
   font-size: 0.85rem;
   resize: vertical;
+  box-sizing: border-box;
 }
 
 .add-server-section {
@@ -325,6 +327,70 @@ button:disabled {
   border-radius: 12px;
   padding: 1.5rem;
   margin-bottom: 2rem;
+}
+
+.collapsible-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.collapsible-header h4 {
+  margin: 0;
+}
+
+.toggle-button {
+  min-width: 80px;
+  padding: 0.5rem 1rem;
+  font-size: 0.8rem;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.action-button {
+  flex: 1;
+  background: linear-gradient(135deg, #718096 0%, #4a5568 100%);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  padding: 1rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-transform: none;
+  letter-spacing: normal;
+  min-width: auto;
+}
+
+.action-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(113, 128, 150, 0.3);
+}
+
+.action-button.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.collapsible-content {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .form-row-responsive {
@@ -348,16 +414,22 @@ button:disabled {
   }
   
   .form-row,
-  .form-row-responsive {
+  .form-row-responsive,
+  .action-buttons {
     flex-direction: column;
   }
   
-  .server-header {
+  .server-header,
+  .collapsible-header {
     flex-direction: column;
     gap: 1rem;
   }
   
   .server-actions {
+    align-self: stretch;
+  }
+  
+  .toggle-button {
     align-self: stretch;
   }
   

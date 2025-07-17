@@ -35,7 +35,7 @@ async fn start_mcp_server_in_sandbox(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Failed to spawn sandboxed MCP server '{}': {}", server_name, e))?;
+        .map_err(|e| format!("Failed to spawn sandboxed MCP server: {}", e))?;
 
     println!("MCP server '{}' started in sandbox!", server_name);
 
@@ -45,7 +45,7 @@ async fn start_mcp_server_in_sandbox(
         let server_name_clone = server_name.clone();
         tauri::async_runtime::spawn(async move {
             while let Ok(Some(line)) = reader.next_line().await {
-                print!("[MCP Server '{}' stdout] {}", server_name_clone, line);
+                print!("[MCP Server '{}' stdout] {}\n", server_name_clone, line);
             }
         });
     }
@@ -56,7 +56,7 @@ async fn start_mcp_server_in_sandbox(
         let server_name_clone = server_name.clone();
         tauri::async_runtime::spawn(async move {
             while let Ok(Some(line)) = reader.next_line().await {
-                eprint!("[MCP Server '{}' stderr] {}", server_name_clone, line);
+                eprint!("[MCP Server '{}' stderr] {}\n", server_name_clone, line);
             }
         });
     }
@@ -70,7 +70,7 @@ async fn start_mcp_server_in_sandbox(
                 Ok(format!("MCP server '{}' exited with status: {:?}", server_name, status))
             }
         }
-        Err(e) => Err(format!("MCP server '{}' failed: {}", server_name, e))
+        Err(e) => Err(format!("MCP server failed: {}", e))
     }
 }
 
