@@ -19,7 +19,7 @@ import { NoModelFound } from "./no-model-found";
 
 interface SimpleChatInputProps {
   onSubmit: (message: string, model: string) => Promise<void>;
-  onModelChange?: () => void;
+  onModelChange?: (modelName: string) => void;
   disabled?: boolean;
   ollamaPort?: number | null;
 }
@@ -124,7 +124,7 @@ export function ChatInput({ onSubmit, onModelChange, disabled = false, ollamaPor
 
   const handleModelChange = (modelName: string) => {
     setSelectedModel(modelName);
-    onModelChange?.();
+    onModelChange?.(modelName);
   };
 
   const formatModelDisplayName = (model: OllamaModel) => {
@@ -145,55 +145,53 @@ export function ChatInput({ onSubmit, onModelChange, disabled = false, ollamaPor
   }
 
   return (
-    <div className="m-3">
-      <AIInput onSubmit={handleSubmit}>
-        <AIInputTextarea
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="What would you like to know?"
-          disabled={disabled}
-          minHeight={48}
-          maxHeight={164}
-        />
-        <AIInputToolbar>
-          <AIInputTools>
-            <AIInputModelSelect
-              value={selectedModel}
-              onValueChange={handleModelChange}
-              disabled={modelsLoading || modelsError !== null}
-            >
-              <AIInputModelSelectTrigger>
-                <AIInputModelSelectValue
-                  placeholder={
-                    modelsLoading
-                      ? "Loading models..."
-                      : modelsError
-                      ? "Error loading models"
-                      : models.length === 0
-                      ? "No models found"
-                      : "Select a model"
-                  }
-                />
-              </AIInputModelSelectTrigger>
-              <AIInputModelSelectContent>
-                {models.map((model) => (
-                  <AIInputModelSelectItem key={model.name} value={model.name}>
-                    {formatModelDisplayName(model)}
-                  </AIInputModelSelectItem>
-                ))}
-              </AIInputModelSelectContent>
-            </AIInputModelSelect>
-            <AIInputButton>
-              <PaperclipIcon size={16} />
-            </AIInputButton>
-            <AIInputButton>
-              <MicIcon size={16} />
-            </AIInputButton>
-          </AIInputTools>
-          <AIInputSubmit status={status} disabled={disabled || !message.trim()} />
-        </AIInputToolbar>
-      </AIInput>
-    </div>
+    <AIInput onSubmit={handleSubmit} className="bg-inherit">
+      <AIInputTextarea
+        value={message}
+        onChange={(e) => setMessage(e.target.value)}
+        onKeyDown={handleKeyDown}
+        placeholder="What would you like to know?"
+        disabled={disabled}
+        minHeight={48}
+        maxHeight={164}
+      />
+      <AIInputToolbar>
+        <AIInputTools>
+          <AIInputModelSelect
+            value={selectedModel}
+            onValueChange={handleModelChange}
+            disabled={modelsLoading || modelsError !== null}
+          >
+            <AIInputModelSelectTrigger>
+              <AIInputModelSelectValue
+                placeholder={
+                  modelsLoading
+                    ? "Loading models..."
+                    : modelsError
+                    ? "Error loading models"
+                    : models.length === 0
+                    ? "No models found"
+                    : "Select a model"
+                }
+              />
+            </AIInputModelSelectTrigger>
+            <AIInputModelSelectContent>
+              {models.map((model) => (
+                <AIInputModelSelectItem key={model.name} value={model.name}>
+                  {formatModelDisplayName(model)}
+                </AIInputModelSelectItem>
+              ))}
+            </AIInputModelSelectContent>
+          </AIInputModelSelect>
+          <AIInputButton>
+            <PaperclipIcon size={16} />
+          </AIInputButton>
+          <AIInputButton>
+            <MicIcon size={16} />
+          </AIInputButton>
+        </AIInputTools>
+        <AIInputSubmit status={status} disabled={disabled || !message.trim()} />
+      </AIInputToolbar>
+    </AIInput>
   );
 }
