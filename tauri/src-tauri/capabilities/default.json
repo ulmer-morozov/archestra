@@ -25,6 +25,16 @@
         }
       ]
     },
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "binaries/ollama-darwin/ollama",
+          "sidecar": true,
+          "args": ["serve"]
+        }
+      ]
+    },
     "shell:allow-open",
     "shell:default"
   ]

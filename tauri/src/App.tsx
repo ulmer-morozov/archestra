@@ -87,17 +87,12 @@ function App() {
       const command = Command.sidecar("binaries/ollama-darwin/ollama", [
         "serve",
       ]);
-      const output = await command.execute();
 
-      if (output.code === 0) {
-        setOllamaStatus(
-          `Ollama server started successfully. stdout: ${output.stdout}`,
-        );
-      } else {
-        setOllamaStatus(
-          `Ollama server failed with code ${output.code}. stderr: ${output.stderr}, stdout: ${output.stdout}`,
-        );
-      }
+      await command.spawn();
+      setOllamaStatus(
+        "Ollama server started successfully (running in background)",
+      );
+      
     } catch (error) {
       const errorMsg =
         error instanceof Error ? error.message : JSON.stringify(error);
