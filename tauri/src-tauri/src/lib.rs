@@ -12,6 +12,17 @@ pub struct McpServerConfig {
     pub args: Vec<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct McpServerDefinition {
+    pub command: String,
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct McpServersConfig {
+    pub mcp_servers: std::collections::HashMap<String, McpServerDefinition>,
+}
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
@@ -86,6 +97,67 @@ async fn run_mcp_server_in_sandbox(
             }
         }
         Err(e) => Err(format!("MCP server failed: {}", e))
+    }
+}
+
+#[tauri::command]
+async fn start_mcp_server_in_sandbox(
+    _app: tauri::AppHandle,
+    server_name: String,
+    config: McpServerDefinition,
+) -> Result<String, String> {
+    use std::process::Stdio;
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    use tokio::process::Command as TokioCommand;
+
+    println!("Starting MCP server '{}' in sandbox", server_name);
+
+    // Build the command with all arguments
+    let mut child = TokioCommand::new("sandbox-exec")
+        .arg("-f").arg("./sandbox-exec-profiles/mcp-server-everything-for-now.sb")
+        .arg(&config.command)
+        .args(&config.args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn sandboxed MCP server '{}': {}", server_name, e))?;
+
+    println!("MCP server '{}' started in sandbox!", server_name);
+
+    // Handle stdout
+    if let Some(stdout) = child.stdout.take() {
+        let mut reader = BufReader::new(stdout).lines();
+        let server_name_clone = server_name.clone();
+        tauri::async_runtime::spawn(async move {
+            while let Ok(Some(line)) = reader.next_line().await {
+                print!("[MCP Server '{}' stdout] {}
+", server_name_clone, line);
+            }
+        });
+    }
+
+    // Handle stderr
+    if let Some(stderr) = child.stderr.take() {
+        let mut reader = BufReader::new(stderr).lines();
+        let server_name_clone = server_name.clone();
+        tauri::async_runtime::spawn(async move {
+            while let Ok(Some(line)) = reader.next_line().await {
+                eprint!("[MCP Server '{}' stderr] {}
+", server_name_clone, line);
+            }
+        });
+    }
+
+    // Wait for the process to complete
+    match child.wait().await {
+        Ok(status) => {
+            if status.success() {
+                Ok(format!("MCP server '{}' completed successfully", server_name))
+            } else {
+                Ok(format!("MCP server '{}' exited with status: {:?}", server_name, status))
+            }
+        }
+        Err(e) => Err(format!("MCP server '{}' failed: {}", server_name, e))
     }
 }
 
@@ -199,7 +271,7 @@ pub fn run() {
 
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![greet, get_hello_server_port, run_mcp_server_in_sandbox])
+        .invoke_handler(tauri::generate_handler![greet, get_hello_server_port, run_mcp_server_in_sandbox, start_mcp_server_in_sandbox])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
