@@ -447,6 +447,219 @@ button:disabled {
   }
 }
 
+/* Navigation */
+.nav-tabs {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+.nav-tab {
+  background: transparent;
+  color: #718096;
+  border: none;
+  padding: 1rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s ease;
+  text-transform: none;
+  letter-spacing: normal;
+  min-width: auto;
+}
+
+.nav-tab:hover:not(:disabled) {
+  color: #667eea;
+  transform: none;
+  box-shadow: none;
+}
+
+.nav-tab.active {
+  color: #667eea;
+  border-bottom-color: #667eea;
+  background: transparent;
+}
+
+/* Featured Servers */
+.featured-servers {
+  display: grid;
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.server-card.featured {
+  background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+  border: 2px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 2rem;
+  transition: all 0.2s ease;
+}
+
+.server-card.featured:hover {
+  border-color: #667eea;
+  box-shadow: 0 8px 24px rgba(102, 126, 234, 0.15);
+  transform: translateY(-2px);
+}
+
+.server-card.featured .server-info h4 {
+  font-size: 1.3rem;
+  margin-bottom: 0.5rem;
+}
+
+.server-card.featured .server-info p {
+  color: #718096;
+  margin-bottom: 1rem;
+  font-size: 0.95rem;
+}
+
+.tag {
+  display: inline-block;
+  background: #667eea;
+  color: white;
+  padding: 0.25rem 0.75rem;
+  border-radius: 16px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-right: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.featured-button {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-transform: none;
+  letter-spacing: normal;
+  min-width: auto;
+}
+
+.featured-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+}
+
+/* Setup Wizard */
+.setup-wizard {
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.setup-progress {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+}
+
+.progress-bar {
+  flex: 1;
+  height: 4px;
+  background: #e2e8f0;
+  border-radius: 2px;
+  margin-right: 1rem;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  transition: width 0.3s ease;
+}
+
+.setup-step {
+  margin-bottom: 2rem;
+}
+
+.setup-step h4 {
+  color: #2d3748;
+  margin-bottom: 1rem;
+  font-size: 1.2rem;
+}
+
+.setup-step p {
+  color: #718096;
+  margin-bottom: 1rem;
+  line-height: 1.6;
+}
+
+.setup-step a {
+  color: #667eea;
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.setup-step a:hover {
+  text-decoration: underline;
+}
+
+.setup-instructions {
+  background: #f8f9fa;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin: 1rem 0;
+}
+
+.setup-instructions ol {
+  margin: 0;
+  padding-left: 1.5rem;
+}
+
+.setup-instructions li {
+  margin-bottom: 0.5rem;
+  color: #4a5568;
+}
+
+.code-block {
+  background: #2d3748;
+  color: #e2e8f0;
+  border-radius: 8px;
+  padding: 1rem;
+  margin: 1rem 0;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 0.9rem;
+  overflow-x: auto;
+}
+
+.setup-actions {
+  display: flex;
+  gap: 1rem;
+  justify-content: flex-end;
+  margin-top: 2rem;
+}
+
+.button-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+@media (max-width: 768px) {
+  .nav-tabs {
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .nav-tab {
+    text-align: left;
+    padding: 1rem;
+  }
+
+  .setup-actions {
+    flex-direction: column;
+  }
+
+  .featured-servers {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     background: linear-gradient(135deg, #1a202c 0%, #2d3748 100%);
@@ -501,5 +714,52 @@ button:disabled {
   
   .server-details {
     color: #a0aec0;
+  }
+
+  .nav-tabs {
+    border-bottom-color: #4a5568;
+  }
+
+  .nav-tab {
+    color: #a0aec0;
+  }
+
+  .nav-tab:hover:not(:disabled) {
+    color: #667eea;
+  }
+
+  .nav-tab.active {
+    color: #667eea;
+    border-bottom-color: #667eea;
+  }
+
+  .server-card.featured {
+    background: linear-gradient(135deg, #2d3748 0%, #4a5568 100%);
+    border-color: #4a5568;
+  }
+
+  .server-card.featured .server-info p {
+    color: #a0aec0;
+  }
+
+  .setup-step h4 {
+    color: #e2e8f0;
+  }
+
+  .setup-step p {
+    color: #a0aec0;
+  }
+
+  .setup-instructions {
+    background: #2d3748;
+    border-color: #4a5568;
+  }
+
+  .setup-instructions li {
+    color: #a0aec0;
+  }
+
+  .progress-bar {
+    background: #4a5568;
   }
 }

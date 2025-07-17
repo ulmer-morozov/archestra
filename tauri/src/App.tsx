@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import MCPCatalogs from "./components/MCPCatalogs";
 import "./App.css";
 
 function App() {
@@ -29,6 +30,7 @@ function App() {
   const [activeSection, setActiveSection] = useState<"none" | "import" | "add">(
     "none",
   );
+  const [activeTab, setActiveTab] = useState<"chat" | "mcp">("chat");
 
   const serverListRef = useRef<HTMLDivElement>(null);
 
@@ -362,230 +364,112 @@ function App() {
         </div>
       </div>
 
-
-      <div className="card">
-        <h3>Ollama Local AI</h3>
-        <div className="form-row">
-          {!isOllamaRunning ? (
-            <button onClick={runOllamaServe}>Start Ollama Server</button>
-          ) : (
-            <button onClick={stopOllamaServe} className="button-danger">
-              Stop Ollama Server
-            </button>
-          )}
-        </div>
-
-        {ollamaStatus && (
-          <div
-            className={`status-text ${
-              ollamaStatus.includes("Error")
-                ? "status-error"
-                : ollamaStatus.includes("successfully")
-                ? "status-success"
-                : ""
-            }`}
-          >
-            {ollamaStatus}
-          </div>
-        )}
-        {ollamaPort && (
-          <div className="status-text status-success">
-            Ollama running on port: {ollamaPort}
-          </div>
-        )}
-      </div>
-
-      <div className="card">
-        <h3>Chat with Ollama</h3>
-        {ollamaPort && availableModels.length > 0 && (
-          <div className="form-row">
-            <label>Model:</label>
-            <select
-              value={selectedModel || ""}
-              onChange={(e) => setSelectedModel(e.target.value)}
-            >
-              {availableModels.map((model) => (
-                <option key={model} value={model}>
-                  {model}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-        <div className="chat-history">
-          {chatHistory.map((msg, index) => (
-            <div key={index} className={`chat-message ${msg.role}`}>
-              <div className="role">{msg.role}</div>
-              <div>{msg.content}</div>
-            </div>
-          ))}
-        </div>
-        <form
-          className="form-row"
-          onSubmit={(e) => {
-            e.preventDefault();
-            sendChatMessage();
-          }}
+      <div className="nav-tabs">
+        <button
+          className={`nav-tab ${activeTab === "chat" ? "active" : ""}`}
+          onClick={() => setActiveTab("chat")}
         >
-          <input
-            value={chatMessage}
-            onChange={(e) => setChatMessage(e.target.value)}
-            placeholder={ollamaPort ? "Type your message..." : "Start Ollama server first..."}
-            disabled={chatLoading || !ollamaPort}
-            style={{ flex: 1 }}
-          />
-          <button type="submit" disabled={chatLoading || !chatMessage.trim() || !ollamaPort}>
-            {chatLoading ? "Sending..." : "Send"}
-          </button>
-        </form>
+          Chat with AI
+        </button>
+        <button
+          className={`nav-tab ${activeTab === "mcp" ? "active" : ""}`}
+          onClick={() => setActiveTab("mcp")}
+        >
+          MCP Catalogs
+        </button>
       </div>
 
-      <div className="card">
-        <h3>MCP Servers Configuration</h3>
-
-        <div className="action-buttons">
-          <button
-            className={`action-button ${
-              activeSection === "import" ? "active" : ""
-            }`}
-            onClick={() =>
-              setActiveSection(activeSection === "import" ? "none" : "import")
-            }
-          >
-            Import JSON
-          </button>
-          <button
-            className={`action-button ${
-              activeSection === "add" ? "active" : ""
-            }`}
-            onClick={() =>
-              setActiveSection(activeSection === "add" ? "none" : "add")
-            }
-          >
-            Add New MCP
-          </button>
-        </div>
-
-        {activeSection === "import" && (
-          <div className="import-section">
-            <div className="collapsible-content">
-              <h4>Import from JSON</h4>
-              <textarea
-                value={jsonImport}
-                onChange={(e) => setJsonImport(e.target.value)}
-                placeholder={`Paste MCP JSON configuration, e.g.:
-{
-  "mcpServers": {
-    "context7": {
-      "command": "npx",
-      "args": ["-y", "@upstash/context7-mcp"]
-    }
-  }
-}`}
-                className="import-textarea"
-              />
-              <div className="form-row">
-                <button onClick={importFromJson} disabled={!jsonImport.trim()}>
-                  Import Servers
+      {activeTab === "chat" && (
+        <>
+          <div className="card">
+            <h3>Ollama Local AI</h3>
+            <div className="form-row">
+              {!isOllamaRunning ? (
+                <button onClick={runOllamaServe}>Start Ollama Server</button>
+              ) : (
+                <button onClick={stopOllamaServe} className="button-danger">
+                  Stop Ollama Server
                 </button>
-              </div>
+              )}
             </div>
-          </div>
-        )}
 
-        {activeSection === "add" && (
-          <div className="add-server-section">
-            <div className="collapsible-content">
-              <h4>Add New MCP Server</h4>
-              <div className="form-group">
-                <label>Server Name</label>
-                <input
-                  value={currentServerName}
-                  onChange={(e) => setCurrentServerName(e.target.value)}
-                  placeholder="e.g., github, context7, browser-tools"
-                />
+            {ollamaStatus && (
+              <div
+                className={`status-text ${
+                  ollamaStatus.includes("Error")
+                    ? "status-error"
+                    : ollamaStatus.includes("successfully")
+                    ? "status-success"
+                    : ""
+                }`}
+              >
+                {ollamaStatus}
               </div>
+            )}
+            {ollamaPort && (
+              <div className="status-text status-success">
+                Ollama running on port: {ollamaPort}
+              </div>
+            )}
+          </div>
 
-              <div className="form-row-responsive">
-                <input
-                  value={currentServerArgs}
-                  onChange={(e) => setCurrentServerArgs(e.target.value)}
-                  placeholder="Arguments (e.g., GITHUB_PERSONAL_ACCESS_TOKEN=token npx -y @modelcontextprotocol/server-github)"
-                />
+          <div className="card">
+            <h3>Chat with Ollama</h3>
+            {ollamaPort && availableModels.length > 0 && (
+              <div className="form-row">
+                <label>Model:</label>
                 <select
-                  value={currentServerCommand}
-                  onChange={(e) => setCurrentServerCommand(e.target.value)}
+                  value={selectedModel || ""}
+                  onChange={(e) => setSelectedModel(e.target.value)}
                 >
-                  <option value="env">env</option>
-                  <option value="npx">npx</option>
-                  <option value="node">node</option>
+                  {availableModels.map((model) => (
+                    <option key={model} value={model}>
+                      {model}
+                    </option>
+                  ))}
                 </select>
               </div>
-
-              <div className="form-row">
-                <button
-                  onClick={addMcpServer}
-                  disabled={!currentServerName.trim()}
-                >
-                  Add Server Configuration
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div>
-          <h4>Configured MCP Servers</h4>
-          {Object.entries(mcpServers).length === 0 ? (
-            <div className="status-text">No servers configured yet.</div>
-          ) : (
-            <div className="server-list" ref={serverListRef}>
-              {Object.entries(mcpServers).map(([name, config]) => (
-                <div key={name} className="server-card">
-                  <div className="server-header">
-                    <div className="server-info">
-                      <h4>{name}</h4>
-                      <div className="server-details">
-                        Command: {config.command}
-                        <br />
-                        Args: {config.args.join(" ")}
-                      </div>
-                    </div>
-                    <div className="server-actions">
-                      <button
-                        onClick={() => runMcpServer(name)}
-                        disabled={mcpServerLoading[name]}
-                      >
-                        {mcpServerLoading[name] ? "Running..." : "Run"}
-                      </button>
-                      <button
-                        onClick={() => removeMcpServer(name)}
-                        disabled={mcpServerLoading[name]}
-                        className="button-danger"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                  {mcpServerStatus[name] && (
-                    <div
-                      className={`status-text ${
-                        mcpServerStatus[name].includes("Error")
-                          ? "status-error"
-                          : mcpServerStatus[name].includes("result")
-                          ? "status-success"
-                          : ""
-                      }`}
-                    >
-                      {mcpServerStatus[name]}
-                    </div>
-                  )}
+            )}
+            <div className="chat-history">
+              {chatHistory.map((msg, index) => (
+                <div key={index} className={`chat-message ${msg.role}`}>
+                  <div className="role">{msg.role}</div>
+                  <div>{msg.content}</div>
                 </div>
               ))}
             </div>
-          )}
-        </div>
-      </div>
+            <form
+              className="form-row"
+              onSubmit={(e) => {
+                e.preventDefault();
+                sendChatMessage();
+              }}
+            >
+              <input
+                value={chatMessage}
+                onChange={(e) => setChatMessage(e.target.value)}
+                placeholder={ollamaPort ? "Type your message..." : "Start Ollama server first..."}
+                disabled={chatLoading || !ollamaPort}
+                style={{ flex: 1 }}
+              />
+              <button type="submit" disabled={chatLoading || !chatMessage.trim() || !ollamaPort}>
+                {chatLoading ? "Sending..." : "Send"}
+              </button>
+            </form>
+          </div>
+        </>
+      )}
+
+      {activeTab === "mcp" && (
+        <MCPCatalogs
+          mcpServers={mcpServers}
+          setMcpServers={setMcpServers}
+          mcpServerStatus={mcpServerStatus}
+          setMcpServerStatus={setMcpServerStatus}
+          mcpServerLoading={mcpServerLoading}
+          setMcpServerLoading={setMcpServerLoading}
+        />
+      )}
     </main>
   );
 }
