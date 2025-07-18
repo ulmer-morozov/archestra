@@ -1,10 +1,12 @@
 use tauri_plugin_shell;
-use tauri::Manager;
+use tauri_plugin_opener;
+use tauri_plugin_deep_link::DeepLinkExt;
 
 pub mod utils;
 pub mod ollama;
 pub mod mcp;
 pub mod database;
+pub mod oauth;
 
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -12,14 +14,40 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_deep_link::init())
         .setup(|app| {
-            // Create the database if it doesn't exist
-            let data_dir = app.path().app_data_dir().map_err(|e| format!("Failed to get data dir: {}", e))?;
-            std::fs::create_dir_all(&data_dir).map_err(|e| format!("Failed to create data dir: {}", e))?;
+            // Load .env file
+            utils::load_dotenv_file()
+                .map_err(|e| format!("Failed to load .env file: {}", e))?;
 
-            println!("Initializing database...");
-            database::init_database().map_err(|e| format!("Database error: {}", e))?;
-            println!("Database initialized successfully");
+            // Initialize database
+            database::init_database(app.handle().clone())
+                .map_err(|e| format!("Database error: {}", e))?;
+
+            // Initialize Gmail OAuth proxy
+            let _ = oauth::start_oauth_proxy(app.handle().clone());
+
+            // Start all persisted MCP servers
+            let app_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = mcp::start_all_mcp_servers(app_handle).await {
+                    eprintln!("Failed to start MCP servers: {}", e);
+                }
+            });
+
+            // Handle OAuth callback deep links
+            // https://v2.tauri.app/plugin/deep-linking/#listening-to-deep-links
+            let app_handle = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                let urls = event.urls();
+                println!("deep link URLs: {:?}", urls);
+                for url in urls {
+                    let app_handle = app_handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        oauth::handle_oauth_callback(app_handle, url.to_string()).await;
+                    });
+                }
+            });
 
             Ok(())
         })
@@ -30,6 +58,10 @@ pub fn run() {
             mcp::save_mcp_server,
             mcp::load_mcp_servers,
             mcp::delete_mcp_server,
+            oauth::start_gmail_auth,
+            oauth::save_gmail_tokens,
+            oauth::load_gmail_tokens,
+            oauth::check_oauth_proxy_health,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

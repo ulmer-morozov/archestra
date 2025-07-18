@@ -32,7 +32,15 @@
       "icons/icon.ico"
     ],
     "externalBin": [
-      "binaries/ollama"
+      "binaries/ollama",
+      "binaries/gmail-oauth-proxy"
     ]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["archestra-ai"]
+      }
+    }
   }
 }

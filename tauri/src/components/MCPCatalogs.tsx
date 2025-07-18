@@ -29,11 +29,77 @@ export default function MCPCatalogs({
   const [jsonImport, setJsonImport] = useState("");
   const [activeSection, setActiveSection] = useState<"none" | "import" | "add">("none");
   const [showGmailSetup, setShowGmailSetup] = useState(false);
-  const [gcpProject, setGcpProject] = useState("");
-  const [oauthCredentials, setOauthCredentials] = useState("");
-  const [setupStep, setSetupStep] = useState(1);
+  const [gmailTokens, setGmailTokens] = useState<any>(null);
 
   const serverListRef = useRef<HTMLDivElement>(null);
+
+  // Check for existing Gmail tokens on component mount
+  useEffect(() => {
+    checkGmailTokens();
+
+    // Listen for OAuth callback messages
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data.type === 'GMAIL_AUTH_SUCCESS') {
+        handleOAuthSuccess(event.data.tokens);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+
+    // Check for tokens in localStorage (fallback)
+    const storedTokens = localStorage.getItem('gmail_tokens');
+    if (storedTokens) {
+      try {
+        const tokens = JSON.parse(storedTokens);
+        handleOAuthSuccess(tokens);
+        localStorage.removeItem('gmail_tokens'); // Clean up
+      } catch (error) {
+        console.error('Failed to parse stored tokens:', error);
+      }
+    }
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+    };
+  }, []);
+
+  async function checkGmailTokens() {
+    try {
+      const tokens = await invoke("load_gmail_tokens") as any;
+      setGmailTokens(tokens);
+    } catch (error) {
+      console.error("Failed to load Gmail tokens:", error);
+    }
+  }
+
+  async function handleOAuthSuccess(tokens: any) {
+    try {
+      // Save tokens to backend
+      await invoke("save_gmail_tokens", { tokens });
+
+      // Update local state
+      setGmailTokens(tokens);
+
+      // Add MCP server to the list
+      setMcpServers((prev) => ({
+        ...prev,
+        "Gmail MCP Server": {
+          command: "npx",
+          args: ["@gongrzhe/server-gmail-autoauth-mcp"],
+        },
+      }));
+
+      // Close the setup dialog
+      setShowGmailSetup(false);
+
+      // Show success message
+      alert("Gmail authentication successful! The MCP server has been configured and added to your list.");
+
+    } catch (error) {
+      console.error("Failed to save Gmail tokens:", error);
+      alert("Failed to save Gmail tokens. Please try again.");
+    }
+  }
 
   async function addMcpServer() {
     if (!currentServerName.trim()) {
@@ -212,44 +278,27 @@ export default function MCPCatalogs({
     }
   }
 
-  async function setupGmailServer() {
+    async function setupGmailServer() {
     try {
-      await invoke("save_mcp_server", {
-        name: "Gmail MCP Server",
-        command: "npx",
-        args: ["@gongrzhe/server-gmail-autoauth-mcp"],
-      });
+      // Check if OAuth proxy is available
+      const proxyHealth = await invoke("check_oauth_proxy_health");
 
-      setMcpServers((prev) => ({
-        ...prev,
-        "Gmail MCP Server": {
-          command: "npx",
-          args: ["@gongrzhe/server-gmail-autoauth-mcp"],
-        },
-      }));
+      if (!proxyHealth) {
+        alert("OAuth proxy service is not running. Please start the OAuth proxy service first.");
+        return;
+      }
 
-      setShowGmailSetup(false);
-      setSetupStep(1);
-      alert("Gmail MCP Server has been configured successfully!");
+      // Start OAuth flow
+      const authResponse = await invoke("start_gmail_auth") as { auth_url: string };
+
+      // The browser will open automatically and handle the OAuth flow
+      // The callback will save tokens and close the setup dialog
+
     } catch (error) {
-      console.error("Failed to setup Gmail MCP server:", error);
-      alert("Failed to setup Gmail MCP server. Please try again.");
+      console.error("Failed to start Gmail auth:", error);
+      alert("Failed to start Gmail authentication. Please try again.");
     }
   }
-
-  const handleNextStep = () => {
-    if (setupStep < 4) {
-      setSetupStep(setupStep + 1);
-    } else {
-      setupGmailServer();
-    }
-  };
-
-  const handlePrevStep = () => {
-    if (setupStep > 1) {
-      setSetupStep(setupStep - 1);
-    }
-  };
 
   return (
     <div className="mcp-catalogs">
@@ -263,16 +312,40 @@ export default function MCPCatalogs({
                 <p>Access and manage your Gmail messages with AI</p>
                 <div className="server-details">
                   <span className="tag">Email Management</span>
-                  <span className="tag">OAuth Required</span>
+                  {gmailTokens ? (
+                    <span className="tag" style={{ backgroundColor: '#d4edda', color: '#155724' }}>
+                      ✅ Authenticated
+                    </span>
+                  ) : (
+                    <span className="tag">OAuth Required</span>
+                  )}
                 </div>
               </div>
               <div className="server-actions">
-                <button
-                  onClick={() => setShowGmailSetup(true)}
-                  className="featured-button"
-                >
-                  Setup Gmail
-                </button>
+                {gmailTokens ? (
+                  <button
+                    onClick={() => {
+                      setMcpServers((prev) => ({
+                        ...prev,
+                        "Gmail MCP Server": {
+                          command: "npx",
+                          args: ["@gongrzhe/server-gmail-autoauth-mcp"],
+                        },
+                      }));
+                    }}
+                    className="featured-button"
+                    style={{ backgroundColor: '#28a745' }}
+                  >
+                    Add to MCP
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setShowGmailSetup(true)}
+                    className="featured-button"
+                  >
+                    Setup Gmail
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -281,121 +354,25 @@ export default function MCPCatalogs({
 
       {showGmailSetup && (
         <div className="card">
-          <h3>Gmail MCP Server Setup</h3>
-          <div className="setup-wizard">
-            <div className="setup-progress">
-              <div className="progress-bar">
-                <div
-                  className="progress-fill"
-                  style={{ width: `${(setupStep / 4) * 100}%` }}
-                ></div>
-              </div>
-              <span>Step {setupStep} of 4</span>
+          <h3>Gmail Authentication</h3>
+          <div className="setup-step">
+            <p>
+              Click the button below to start the Gmail authentication process.
+              This will open your browser where you can authorize access to your Gmail account.
+            </p>
+            <div className="setup-instructions">
+              <ol>
+                <li>Click "Start Authentication" below</li>
+                <li>Your browser will open to Google's authorization page</li>
+                <li>Sign in with your Google account</li>
+                <li>Grant permission to access your Gmail</li>
+                <li>You'll be redirected back to the app automatically</li>
+                <li>Your tokens will be saved and the MCP server will be configured</li>
+              </ol>
             </div>
-
-            {setupStep === 1 && (
-              <div className="setup-step">
-                <h4>1. Create Google Cloud Project</h4>
-                <p>
-                  Create a new project in the{" "}
-                  <a href="https://console.cloud.google.com/" target="_blank">
-                    Google Cloud Console
-                  </a>
-                </p>
-                <div className="form-group">
-                  <label>Project ID (optional - for reference)</label>
-                  <input
-                    value={gcpProject}
-                    onChange={(e) => setGcpProject(e.target.value)}
-                    placeholder="my-gmail-mcp-project"
-                  />
-                </div>
-                <div className="setup-instructions">
-                  <ol>
-                    <li>Go to Google Cloud Console</li>
-                    <li>Click "New Project"</li>
-                    <li>Enter a project name</li>
-                    <li>Click "Create"</li>
-                  </ol>
-                </div>
-              </div>
-            )}
-
-            {setupStep === 2 && (
-              <div className="setup-step">
-                <h4>2. Enable Gmail API</h4>
-                <div className="setup-instructions">
-                  <ol>
-                    <li>Go to the APIs & Services dashboard</li>
-                    <li>Click "Enable APIs and Services"</li>
-                    <li>Search for "Gmail API"</li>
-                    <li>Click on Gmail API and then "Enable"</li>
-                  </ol>
-                </div>
-                <p>
-                  <a
-                    href="https://console.cloud.google.com/apis/library/gmail.googleapis.com"
-                    target="_blank"
-                  >
-                    Direct link to Gmail API
-                  </a>
-                </p>
-              </div>
-            )}
-
-            {setupStep === 3 && (
-              <div className="setup-step">
-                <h4>3. Create OAuth 2.0 Credentials</h4>
-                <div className="setup-instructions">
-                  <ol>
-                    <li>Go to APIs & Services {">"} Credentials</li>
-                    <li>Click "Create Credentials" {">"} "OAuth 2.0 Client IDs"</li>
-                    <li>Choose "Desktop application" as the application type</li>
-                    <li>Give it a name (e.g., "Gmail MCP Client")</li>
-                    <li>Click "Create"</li>
-                    <li>Download the JSON file</li>
-                  </ol>
-                </div>
-                <p>
-                  <a
-                    href="https://console.cloud.google.com/apis/credentials"
-                    target="_blank"
-                  >
-                    Go to Credentials page
-                  </a>
-                </p>
-              </div>
-            )}
-
-            {setupStep === 4 && (
-              <div className="setup-step">
-                <h4>4. Save OAuth Credentials</h4>
-                <div className="setup-instructions">
-                  <ol>
-                    <li>Rename the downloaded file to "gcp-oauth.keys.json"</li>
-                    <li>Create directory: ~/.gmail-mcp</li>
-                    <li>Move the file to: ~/.gmail-mcp/gcp-oauth.keys.json</li>
-                    <li>Run authentication: npx @gongrzhe/server-gmail-autoauth-mcp auth</li>
-                  </ol>
-                </div>
-                <div className="code-block">
-                  <code>
-                    mkdir -p ~/.gmail-mcp<br />
-                    mv ~/Downloads/gcp-oauth.keys.json ~/.gmail-mcp/<br />
-                    npx @gongrzhe/server-gmail-autoauth-mcp auth
-                  </code>
-                </div>
-              </div>
-            )}
-
             <div className="setup-actions">
-              {setupStep > 1 && (
-                <button onClick={handlePrevStep} className="button-secondary">
-                  Previous
-                </button>
-              )}
-              <button onClick={handleNextStep} className="button-primary">
-                {setupStep === 4 ? "Complete Setup" : "Next"}
+              <button onClick={setupGmailServer} className="button-primary">
+                Start Authentication
               </button>
               <button
                 onClick={() => setShowGmailSetup(false)}

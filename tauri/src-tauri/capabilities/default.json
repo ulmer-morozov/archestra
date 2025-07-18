@@ -15,6 +15,10 @@
           "args": ["serve"]
         },
         {
+          "name": "binaries/gmail-oauth-proxy",
+          "sidecar": true
+        },
+        {
           "name": "pkill",
           "args": ["-f", "ollama"]
         }
@@ -22,6 +26,8 @@
     },
     "shell:allow-open",
     "shell:allow-kill",
-    "shell:default"
+    "shell:default",
+    "core:event:default",
+    "deep-link:default"
   ]
 }
