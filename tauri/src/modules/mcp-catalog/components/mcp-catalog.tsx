@@ -14,7 +14,6 @@ import {
   Mail,
   Plus,
   Download,
-  Play,
   Trash2,
   ChevronRight,
   ChevronLeft,
@@ -58,7 +57,6 @@ export function MCPCatalog({
   const [activeSection, setActiveSection] = useState<"none" | "import" | "add">("none");
   const [showGmailSetup, setShowGmailSetup] = useState(false);
   const [gcpProject, setGcpProject] = useState("");
-  const [oauthCredentials, setOauthCredentials] = useState("");
   const [setupStep, setSetupStep] = useState(1);
 
   const serverListRef = useRef<HTMLDivElement>(null);
@@ -104,37 +102,6 @@ export function MCPCatalog({
     }
   }
 
-  async function runMcpServer(serverName: string) {
-    setMcpServerLoading((prev) => ({ ...prev, [serverName]: true }));
-    setMcpServerStatus((prev) => ({
-      ...prev,
-      [serverName]: "Starting MCP server in sandbox...",
-    }));
-
-    try {
-      const server = mcpServers[serverName];
-      const result = await invoke("run_mcp_server_in_sandbox", {
-        serverName: serverName,
-        config: {
-          command: server.command,
-          args: server.args,
-        },
-      });
-
-      setMcpServerStatus((prev) => ({
-        ...prev,
-        [serverName]: `MCP server result: ${result}`,
-      }));
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : "An unknown error occurred";
-      setMcpServerStatus((prev) => ({
-        ...prev,
-        [serverName]: `Error: ${errorMsg}`,
-      }));
-    }
-
-    setMcpServerLoading((prev) => ({ ...prev, [serverName]: false }));
-  }
 
   async function stopMcpServer(serverName: string) {
     setMcpServerLoading((prev) => ({ ...prev, [serverName]: true }));

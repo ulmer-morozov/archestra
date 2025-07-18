@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useState, useCallback } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { useState, useCallback, useEffect } from "react";
 
 interface IChatMessage {
   id: string;
@@ -43,10 +44,160 @@ interface IArgs {
 export function usePostChatMessage({ ollamaPort, mcpTools }: IArgs) {
   const [chatHistory, setChatHistory] = useState<IChatMessage[]>([]);
   const [isChatLoading, setIsChatLoading] = useState(false);
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(
+    null,
+  );
 
   const clearChatHistory = useCallback(() => {
     setChatHistory([]);
   }, []);
+
+  // Set up streaming event listeners
+  useEffect(() => {
+    const setupListeners = async () => {
+      // Listen for streaming chunks
+      const unlistenChunk = await listen("ollama-chunk", (event: any) => {
+        const { total_content } = event.payload;
+
+        // Update the streaming message in chat history
+        setChatHistory((prev) => {
+          return prev.map((msg) =>
+            msg.id === streamingMessageId && msg.isStreaming
+              ? {
+                  ...msg,
+                  content: total_content,
+                }
+              : msg,
+          );
+        });
+      });
+
+      // Listen for tool results
+      const unlistenToolResults = await listen(
+        "ollama-tool-results",
+        (event: any) => {
+          const { tool_results, message } = event.payload;
+
+          if (tool_results && tool_results.length > 0 && streamingMessageId) {
+            // Extract tool calls from the message to get server/tool names
+            const originalToolCalls = message?.tool_calls || [];
+
+            // Create tool call info from results
+            const toolCallsInfo: ToolCallInfo[] = tool_results.map(
+              (toolResult: any, index: number) => {
+                const toolId = `tool-${Date.now()}-${index}`;
+
+                // Try to match tool result with original tool call to get metadata
+                const matchingToolCall = originalToolCalls[index];
+                let serverName = "mcp";
+                let toolName = `tool-${index + 1}`;
+                let toolArguments = {};
+
+                if (matchingToolCall?.function) {
+                  const functionName = matchingToolCall.function.name;
+                  if (functionName && functionName.includes("_")) {
+                    const [server, tool] = functionName.split("_", 2);
+                    serverName = server;
+                    toolName = tool;
+                  }
+                  toolArguments = matchingToolCall.function.arguments || {};
+                }
+
+                // Extract text content from the complex structure
+                let resultContent = "";
+                if (toolResult.content) {
+                  if (typeof toolResult.content === "string") {
+                    resultContent = toolResult.content;
+                  } else if (Array.isArray(toolResult.content)) {
+                    // Handle array of content objects
+                    resultContent = toolResult.content
+                      .map((item: any) => item.text || item.content || item)
+                      .join("\n");
+                  } else if (toolResult.content.text) {
+                    resultContent = toolResult.content.text;
+                  } else {
+                    resultContent = JSON.stringify(toolResult.content, null, 2);
+                  }
+                } else if (toolResult.result) {
+                  resultContent = toolResult.result;
+                }
+
+                return {
+                  id: toolId,
+                  serverName,
+                  toolName,
+                  arguments: toolArguments,
+                  result: resultContent,
+                  error: toolResult.error,
+                  status: toolResult.error ? "error" : ("completed" as const),
+                  executionTime: 0,
+                  startTime: new Date(),
+                  endTime: new Date(),
+                };
+              },
+            );
+
+            // Update AI message with tool execution info
+            setChatHistory((prev) =>
+              prev.map((msg) =>
+                msg.id === streamingMessageId
+                  ? {
+                      ...msg,
+                      isToolExecuting: false,
+                      toolCalls: toolCallsInfo,
+                    }
+                  : msg,
+              ),
+            );
+
+            // Add individual tool result messages
+            for (const toolResult of tool_results) {
+              const toolMessage = {
+                id: (Date.now() + Math.random()).toString(),
+                role: "tool",
+                content: `Tool: ${toolResult.tool_name}\nResult: ${toolResult.result}`,
+                timestamp: new Date(),
+              };
+              setChatHistory((prev) => [...prev, toolMessage]);
+            }
+          }
+        },
+      );
+
+      // Listen for completion
+      const unlistenComplete = await listen("ollama-complete", (event: any) => {
+        const { content } = event.payload;
+
+        // Finalize the streaming message
+        setChatHistory((prev) => {
+          return prev.map((msg) =>
+            msg.id === streamingMessageId && msg.isStreaming
+              ? {
+                  ...msg,
+                  content: content,
+                  isStreaming: false,
+                  isToolExecuting: false,
+                }
+              : msg,
+          );
+        });
+
+        setStreamingMessageId(null);
+        setIsChatLoading(false);
+      });
+
+      return () => {
+        unlistenChunk();
+        unlistenToolResults();
+        unlistenComplete();
+      };
+    };
+
+    const cleanup = setupListeners();
+    return () => {
+      cleanup.then((fn) => fn());
+    };
+  }, [streamingMessageId]);
 
   const sendChatMessage = useCallback(
     async (message: string, model: string) => {
@@ -97,7 +248,14 @@ export function usePostChatMessage({ ollamaPort, mcpTools }: IArgs) {
         });
 
         if (mcpTools.length > 0 && modelSupportsTools) {
-          console.log("🎯 Using tool-enabled chat with", mcpTools.length, "tools");
+          console.log(
+            "🎯 Using streaming tool-enabled chat with",
+            mcpTools.length,
+            "tools",
+          );
+
+          // Set the streaming message ID
+          setStreamingMessageId(aiMsgId);
 
           // Mark AI message as tool executing
           setChatHistory((prev) =>
@@ -106,108 +264,29 @@ export function usePostChatMessage({ ollamaPort, mcpTools }: IArgs) {
                 ? {
                     ...msg,
                     isToolExecuting: true,
-                    content: "🔧 Analyzing your request and preparing to execute tools...",
+                    content:
+                      "🔧 Analyzing your request and preparing to execute tools...",
                   }
-                : msg
-            )
+                : msg,
+            ),
           );
 
-          // Use the enhanced tool-enabled chat
-          const messages = [{ role: "user", content: currentMessage, tool_calls: null }];
+          // Use the streaming tool-enabled chat
+          const messages = [
+            { role: "user", content: currentMessage, tool_calls: null },
+          ];
 
-          const response = await invoke<any>("ollama_chat_with_tools", {
+          await invoke("ollama_chat_with_tools_streaming", {
             port: ollamaPort,
             model: model,
             messages: messages,
           });
 
-          console.log("🔧 Tool-enabled response received:", response);
-
-          let toolCallsInfo: ToolCallInfo[] = [];
-
-          if (response.tool_results && response.tool_results.length > 0) {
-            console.log("🛠️ Processing", response.tool_results.length, "tool results");
-
-            // Create tool call info from results
-            toolCallsInfo = response.tool_results.map((toolResult: any, index: number) => {
-              // Extract server and tool name from the content (assuming format from backend)
-              const toolId = `tool-${Date.now()}-${index}`;
-
-              return {
-                id: toolId,
-                serverName: "mcp", // Will be enhanced when backend provides more details
-                toolName: `tool-${index + 1}`,
-                arguments: {}, // Will be enhanced when backend provides arguments
-                result: toolResult.content,
-                status: "completed" as const,
-                executionTime: 0, // Will be enhanced with timing
-                startTime: new Date(),
-                endTime: new Date(),
-              };
-            });
-
-            // Update AI message with tool execution info
-            setChatHistory((prev) =>
-              prev.map((msg) =>
-                msg.id === aiMsgId
-                  ? {
-                      ...msg,
-                      isToolExecuting: false,
-                      toolCalls: toolCallsInfo,
-                      content: "Tools executed successfully. Processing results...",
-                    }
-                  : msg
-              )
-            );
-
-            // Add individual tool result messages for better visibility
-            for (const toolResult of response.tool_results) {
-              const toolMessage = {
-                id: (Date.now() + Math.random()).toString(),
-                role: "tool",
-                content: `${toolResult.content}`,
-                timestamp: new Date(),
-              };
-              setChatHistory((prev) => [...prev, toolMessage]);
-            }
-          }
-
-          if (response.message && response.message.content) {
-            console.log("💬 Setting AI response:", response.message.content);
-            setChatHistory((prev) =>
-              prev.map((msg) =>
-                msg.id === aiMsgId
-                  ? {
-                      ...msg,
-                      content: response.message.content,
-                      isStreaming: false,
-                      isToolExecuting: false,
-                      toolCalls: toolCallsInfo,
-                    }
-                  : msg
-              )
-            );
-          } else {
-            console.warn("⚠️ No message content in tool-enabled response");
-            setChatHistory((prev) =>
-              prev.map((msg) =>
-                msg.id === aiMsgId
-                  ? {
-                      ...msg,
-                      content:
-                        toolCallsInfo.length > 0
-                          ? "Tools executed successfully, but no additional response was generated."
-                          : "Tool execution completed but no response received.",
-                      isStreaming: false,
-                      isToolExecuting: false,
-                      toolCalls: toolCallsInfo,
-                    }
-                  : msg
-              )
-            );
-          }
+          // The response will be handled by the event listeners
         } else {
-          console.log("📡 Using streaming chat (tools disabled or model doesn't support tools)");
+          console.log(
+            "📡 Using streaming chat (tools disabled or model doesn't support tools)",
+          );
 
           // Add warning if tools are available but model doesn't support them
           if (mcpTools.length > 0 && !modelSupportsTools) {
@@ -221,15 +300,30 @@ export function usePostChatMessage({ ollamaPort, mcpTools }: IArgs) {
           }
 
           // Use streaming Ollama chat with thinking content parsing
-          const response = await fetch(`http://localhost:${ollamaPort}/api/generate`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              model: model,
-              prompt: currentMessage,
-              stream: true,
-            }),
-          });
+          const response = await fetch(
+            `http://localhost:${ollamaPort}/api/chat`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                model: model,
+                messages: [
+                  ...chatHistory.map((msg) => ({
+                    role: msg.role,
+                    content: msg.content,
+                  })),
+                  { role: "user", content: currentMessage },
+                ],
+                stream: true,
+                options: {
+                  temperature: 0.7,
+                  top_p: 0.95,
+                  top_k: 40,
+                  num_predict: 32768,
+                },
+              }),
+            },
+          );
 
           if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -255,8 +349,8 @@ export function usePostChatMessage({ ollamaPort, mcpTools }: IArgs) {
               try {
                 const data = JSON.parse(line);
 
-                if (data.response) {
-                  accumulatedContent += data.response;
+                if (data.message?.content) {
+                  accumulatedContent += data.message.content;
 
                   const parseContent = (content: string) => {
                     const thinkStartMatch = content.match(/<think>/);
@@ -267,7 +361,10 @@ export function usePostChatMessage({ ollamaPort, mcpTools }: IArgs) {
                       const thinkEnd = thinkEndMatch.index!;
 
                       const beforeThink = content.substring(0, thinkStart);
-                      const thinkingContent = content.substring(thinkStart + 7, thinkEnd);
+                      const thinkingContent = content.substring(
+                        thinkStart + 7,
+                        thinkEnd,
+                      );
                       const afterThink = content.substring(thinkEnd + 8);
 
                       return {
@@ -304,18 +401,25 @@ export function usePostChatMessage({ ollamaPort, mcpTools }: IArgs) {
                             content: parsed.response,
                             thinkingContent: parsed.thinking,
                             isStreaming: !data.done,
-                            isThinkingStreaming: parsed.isThinkingStreaming && !data.done,
+                            isThinkingStreaming:
+                              parsed.isThinkingStreaming && !data.done,
                           }
-                        : msg
-                    )
+                        : msg,
+                    ),
                   );
                 }
 
                 if (data.done) {
                   setChatHistory((prev) =>
                     prev.map((msg) =>
-                      msg.id === aiMsgId ? { ...msg, isStreaming: false, isThinkingStreaming: false } : msg
-                    )
+                      msg.id === aiMsgId
+                        ? {
+                            ...msg,
+                            isStreaming: false,
+                            isThinkingStreaming: false,
+                          }
+                        : msg,
+                    ),
                   );
                   break;
                 }
@@ -326,7 +430,8 @@ export function usePostChatMessage({ ollamaPort, mcpTools }: IArgs) {
           }
         }
       } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : "An unknown error occurred";
+        const errorMsg =
+          error instanceof Error ? error.message : "An unknown error occurred";
         setChatHistory((prev) =>
           prev.map((msg) =>
             msg.id === aiMsgId
@@ -335,14 +440,14 @@ export function usePostChatMessage({ ollamaPort, mcpTools }: IArgs) {
                   content: `Error: ${errorMsg}`,
                   isStreaming: false,
                 }
-              : msg
-          )
+              : msg,
+          ),
         );
       }
 
       setIsChatLoading(false);
     },
-    [ollamaPort, mcpTools]
+    [ollamaPort, mcpTools],
   );
 
   return {
