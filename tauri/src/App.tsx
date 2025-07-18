@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useState, useRef, useEffect } from "react";
-import { MessageCircle, Bot, Bug } from "lucide-react";
+import { MessageCircle, Bot, Bug, Download } from "lucide-react";
 
 import { useOllamaServer } from "./modules/chat/contexts/ollama-server-context";
 
@@ -8,6 +8,7 @@ import { Button } from "./components/ui/button";
 import { ScrollArea } from "./components/ui/scroll-area";
 import { ChatContainer } from "./modules/chat/components/chat-container";
 import { MCPCatalog } from "./modules/mcp-catalog/components/mcp-catalog";
+import { ModelsManager } from "./modules/models/components/models-manager";
 import { OllamaServerCard } from "./modules/chat/components/ollama-server-card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
@@ -37,7 +38,7 @@ function App() {
   const [mcpServerStatuses, setMcpServerStatuses] = useState<{
     [key: string]: boolean;
   }>({});
-  const [activeTab, setActiveTab] = useState<"chat" | "mcp">("chat");
+  const [activeTab, setActiveTab] = useState<"chat" | "mcp" | "models">("chat");
   const [debugInfo, setDebugInfo] = useState<string>("");
 
   const { isOllamaRunning } = useOllamaServer();
@@ -189,14 +190,19 @@ function App() {
 
         <Tabs
           value={activeTab}
-          onValueChange={(value: string) => setActiveTab(value as "chat" | "mcp")}
+          onValueChange={(value: string) => setActiveTab(value as "chat" | "mcp" | "models")}
           className="mb-6"
         >
           <div className="flex items-center gap-2">
-            <TabsList className="grid w-full grid-cols-2">
+            <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="chat" className="flex items-center gap-2">
                 <MessageCircle className="h-4 w-4" />
                 Chat with AI
+              </TabsTrigger>
+
+              <TabsTrigger value="models" className="flex items-center gap-2">
+                <Download className="h-4 w-4" />
+                Model Library
               </TabsTrigger>
 
               <TabsTrigger value="mcp" className="flex items-center gap-2">
@@ -233,6 +239,10 @@ function App() {
                 </CardContent>
               </Card>
             )}
+          </TabsContent>
+
+          <TabsContent value="models" className="space-y-6">
+            <ModelsManager />
           </TabsContent>
 
           <TabsContent value="mcp">
