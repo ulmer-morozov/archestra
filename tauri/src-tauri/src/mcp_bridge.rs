@@ -7,6 +7,9 @@ use tokio::process::{Child, Command as TokioCommand};
 use tokio::sync::{mpsc, Mutex as TokioMutex};
 use uuid::Uuid;
 use std::time::{Duration, Instant};
+use tauri::Manager;
+
+pub struct McpBridgeState(pub Arc<McpBridge>);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonRpcRequest {
@@ -114,7 +117,7 @@ impl McpBridge {
             .ok_or_else(|| format!("Failed to get stdout for MCP server '{}'", name))?;
         let stderr = child.stderr.take()
             .ok_or_else(|| format!("Failed to get stderr for MCP server '{}'", name))?;
-        
+
         // Store process handle
         let process_handle = Arc::new(TokioMutex::new(child));
 
@@ -129,7 +132,7 @@ impl McpBridge {
 
         // Create response buffer with bounded size
         let response_buffer: Arc<Mutex<VecDeque<ResponseEntry>>> = Arc::new(Mutex::new(VecDeque::new()));
-        
+
         // Handle stdout with message parsing and buffer management
         let server_name_clone = name.clone();
         let response_buffer_clone = response_buffer.clone();
@@ -137,20 +140,20 @@ impl McpBridge {
             let mut stdout_reader = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = stdout_reader.next_line().await {
                 println!("[MCP Server '{}' stdout] {}", server_name_clone, line);
-                
+
                 // Store response in buffer with timestamp
                 {
                     let mut buffer = response_buffer_clone.lock().unwrap();
-                    
+
                     // Clean up old entries
                     let now = Instant::now();
                     buffer.retain(|entry| now.duration_since(entry.timestamp) < RESPONSE_CLEANUP_INTERVAL);
-                    
+
                     // Add new entry, respecting max buffer size
                     if buffer.len() >= MAX_BUFFER_SIZE {
                         buffer.pop_front();
                     }
-                    
+
                     buffer.push_back(ResponseEntry {
                         content: line,
                         timestamp: now,
@@ -233,7 +236,7 @@ impl McpBridge {
             Ok(response) => {
                 println!("Initialize response: {:?}", response);
                 if let Some(error) = response.error {
-                    return Err(format!("Initialize error from server: {} (code: {})", 
+                    return Err(format!("Initialize error from server: {} (code: {})",
                                      error.message, error.code));
                 }
             }
@@ -274,7 +277,7 @@ impl McpBridge {
         } else {
             return Err(format!("No stdin channel found for server '{}'", server_name));
         }
-        
+
         // Give server time to process initialized notification
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
@@ -289,13 +292,13 @@ impl McpBridge {
                 let servers = self.servers.lock().unwrap();
                 servers.get(server_name).map(|s| s.tools.len()).unwrap_or(0)
             };
-            
+
             if tool_count == 0 {
                 println!("🔄 Tool discovery succeeded but found 0 tools for '{}', trying fallback", server_name);
                 self.register_known_tools_if_available(server_name).await;
             }
         }
-        
+
         // Discover resources (optional - some MCP servers may not support this)
         if let Err(e) = self.discover_resources(server_name).await {
             println!("⚠️ Resource discovery failed for '{}': {} (resources are optional)", server_name, e);
@@ -318,14 +321,14 @@ impl McpBridge {
         let mut last_error = String::new();
         for attempt in 1..=3 {
             println!("🔄 Tools discovery attempt {}/3 for server '{}'", attempt, server_name);
-            
+
             match self.send_tools_list_request(server_name, &list_tools_request).await {
                 Ok(response) => {
                     println!("✅ Received response for tools/list from '{}': {:?}", server_name, response);
-                    
+
                     if let Some(result) = response.result {
                         println!("🔍 Tools list result from '{}': {:?}", server_name, result);
-                        
+
                         if let Ok(tools_data) = serde_json::from_value::<serde_json::Value>(result.clone()) {
                             if let Some(tools_array) = tools_data.get("tools").and_then(|v| v.as_array()) {
                                 println!("🎯 Found {} tools in response from '{}'", tools_array.len(), server_name);
@@ -359,8 +362,8 @@ impl McpBridge {
                                     let mut servers = self.servers.lock().unwrap();
                                     if let Some(server) = servers.get_mut(server_name) {
                                         server.tools = tools;
-                                        println!("🎉 Discovered {} tools for server '{}'. Total tools in bridge: {}", 
-                                                 server.tools.len(), server_name, 
+                                        println!("🎉 Discovered {} tools for server '{}'. Total tools in bridge: {}",
+                                                 server.tools.len(), server_name,
                                                  servers.values().map(|s| s.tools.len()).sum::<usize>());
                                     }
                                 }
@@ -392,7 +395,7 @@ impl McpBridge {
                     println!("❌ {}", last_error);
                 }
             }
-            
+
             // Wait before retry (except on last attempt)
             if attempt < 3 {
                 let delay_ms = 1000 * attempt; // Exponential backoff: 1s, 2s
@@ -400,7 +403,7 @@ impl McpBridge {
                 tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
             }
         }
-        
+
         // All retries failed
         Err(format!("Tools discovery failed for server '{}' after 3 attempts: {}", server_name, last_error))
     }
@@ -408,9 +411,9 @@ impl McpBridge {
     async fn register_known_tools_if_available(&self, server_name: &str) {
         // Generic fallback mechanism for servers that don't support tools/list
         // Try to register some basic tool hints to help the LLM understand what's available
-        
+
         let tool_hints = self.get_server_tool_hints(server_name);
-        
+
         if !tool_hints.is_empty() {
             println!("📋 Registering {} tool hints for server '{}'", tool_hints.len(), server_name);
             let mut servers = self.servers.lock().unwrap();
@@ -424,13 +427,13 @@ impl McpBridge {
             println!("ℹ️ No tool hints available for server '{}', tools will be dynamically discovered", server_name);
         }
     }
-    
+
     fn get_server_tool_hints(&self, server_name: &str) -> Vec<McpTool> {
         // Generic pattern-based tool hints for common MCP servers
         // This allows the LLM to know what tools are likely available
-        
+
         let server_lower = server_name.to_lowercase();
-        
+
         if server_lower.contains("context7") || server_lower.contains("context-7") {
             vec![
                 McpTool {
@@ -522,7 +525,7 @@ impl McpBridge {
         match self.send_request_with_retry(server_name, &list_resources_request, 2).await {
             Ok(response) => {
                 println!("Received response for resources/list: {:?}", response);
-                
+
                 if let Some(result) = response.result {
                     if let Ok(resources_data) = serde_json::from_value::<serde_json::Value>(result) {
                         if let Some(resources_array) = resources_data.get("resources").and_then(|v| v.as_array()) {
@@ -595,7 +598,7 @@ impl McpBridge {
     async fn send_request_with_retry(&self, server_name: &str, request: &JsonRpcRequest, max_retries: u32) -> Result<JsonRpcResponse, String> {
         let mut retries = 0;
         let mut last_error = String::new();
-        
+
         while retries <= max_retries {
             match self.send_request_and_wait(server_name, request).await {
                 Ok(response) => return Ok(response),
@@ -610,7 +613,7 @@ impl McpBridge {
                 }
             }
         }
-        
+
         Err(format!("Request failed after {} retries: {}", max_retries, last_error))
     }
 
@@ -629,16 +632,16 @@ impl McpBridge {
 
         // Wait for response with shorter timeout for tools/list
         let start_time = Instant::now();
-        
+
         while start_time.elapsed() < TOOLS_LIST_TIMEOUT {
             // Check response buffer
             {
                 let mut buffer = response_buffer.lock().unwrap();
-                
+
                 // Clean up old entries while we're here
                 let now = Instant::now();
                 buffer.retain(|entry| now.duration_since(entry.timestamp) < RESPONSE_CLEANUP_INTERVAL);
-                
+
                 // Process entries from oldest to newest
                 let mut found_response = None;
                 for (i, entry) in buffer.iter().enumerate() {
@@ -650,19 +653,19 @@ impl McpBridge {
                         }
                     }
                 }
-                
+
                 // Remove the found response and return it
                 if let Some((index, response)) = found_response {
                     buffer.remove(index);
                     return Ok(response);
                 }
             }
-            
+
             // Wait a bit before checking again
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
 
-        Err(format!("Tools/list request '{}' to server '{}' timed out after {:?}", 
+        Err(format!("Tools/list request '{}' to server '{}' timed out after {:?}",
                     request.method, server_name, TOOLS_LIST_TIMEOUT))
     }
 
@@ -681,16 +684,16 @@ impl McpBridge {
 
         // Wait for response with timeout
         let start_time = Instant::now();
-        
+
         while start_time.elapsed() < REQUEST_TIMEOUT {
             // Check response buffer
             {
                 let mut buffer = response_buffer.lock().unwrap();
-                
+
                 // Clean up old entries while we're here
                 let now = Instant::now();
                 buffer.retain(|entry| now.duration_since(entry.timestamp) < RESPONSE_CLEANUP_INTERVAL);
-                
+
                 // Process entries from oldest to newest
                 let mut found_response = None;
                 for (i, entry) in buffer.iter().enumerate() {
@@ -702,19 +705,19 @@ impl McpBridge {
                         }
                     }
                 }
-                
+
                 // Remove the found response and return it
                 if let Some((index, response)) = found_response {
                     buffer.remove(index);
                     return Ok(response);
                 }
             }
-            
+
             // Wait a bit before checking again
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
 
-        Err(format!("Request '{}' to server '{}' timed out after {:?}", 
+        Err(format!("Request '{}' to server '{}' timed out after {:?}",
                     request.method, server_name, REQUEST_TIMEOUT))
     }
 
@@ -728,7 +731,7 @@ impl McpBridge {
                 if !server.is_running {
                     return Err(format!("MCP server '{}' is not running", server_name));
                 }
-                
+
                 // Check if tool exists in discovered tools, but allow execution even if not pre-discovered
                 let tool_exists = server.tools.iter().any(|t| t.name == tool_name);
                 if !tool_exists && !server.tools.is_empty() {
@@ -826,34 +829,34 @@ impl McpBridge {
     pub fn get_debug_server_info(&self) -> Vec<String> {
         let servers = self.servers.lock().unwrap();
         let mut debug_info = Vec::new();
-        
+
         for (name, server) in servers.iter() {
-            let mut server_info = format!("Server '{}': Command: {} {:?}", 
+            let mut server_info = format!("Server '{}': Command: {} {:?}",
                 name, server.command, server.args);
             server_info.push_str(&format!("\n  Running: {}", server.is_running));
             server_info.push_str(&format!("\n  Tools Count: {}", server.tools.len()));
             server_info.push_str(&format!("\n  Resources Count: {}", server.resources.len()));
             server_info.push_str(&format!("\n  Has stdin: {}", server.stdin_tx.is_some()));
             server_info.push_str(&format!("\n  Process handle: {}", server.process_handle.is_some()));
-            
+
             // Response buffer info
             if let Ok(buffer) = server.response_buffer.lock() {
                 server_info.push_str(&format!("\n  Response buffer size: {}", buffer.len()));
                 if !buffer.is_empty() {
-                    server_info.push_str(&format!("\n  Latest response: {}", 
+                    server_info.push_str(&format!("\n  Latest response: {}",
                         buffer.back().map(|e| e.content.as_str()).unwrap_or("None")));
                 }
             }
-            
+
             debug_info.push(server_info);
         }
-        
+
         debug_info
     }
 
     pub async fn stop_server(&self, server_name: &str) -> Result<(), String> {
         println!("Stopping MCP server '{}'", server_name);
-        
+
         // Get the process handle and other resources
         let (process_handle, stdin_tx) = {
             let mut servers = self.servers.lock().unwrap();
@@ -866,15 +869,15 @@ impl McpBridge {
                 return Err(format!("Server '{}' not found", server_name));
             }
         };
-        
+
         // Close stdin channel to signal shutdown
         drop(stdin_tx);
-        
+
         // Terminate the process if it exists
         if let Some(handle) = process_handle {
             // Clone the Arc to avoid holding the lock across await
             let handle_clone = handle.clone();
-            
+
             // Kill the process
             {
                 let mut child = handle.lock().await;
@@ -882,13 +885,13 @@ impl McpBridge {
                     eprintln!("Failed to kill MCP server '{}' process: {}", server_name, e);
                 }
             } // Lock is dropped here
-            
+
             // Wait for the process to exit
             let wait_result = tokio::spawn(async move {
                 let mut child = handle_clone.lock().await;
                 child.wait().await
             });
-            
+
             match tokio::time::timeout(Duration::from_secs(5), wait_result).await {
                 Ok(Ok(Ok(status))) => {
                     println!("MCP server '{}' exited with status: {:?}", server_name, status);
@@ -904,7 +907,7 @@ impl McpBridge {
                 }
             }
         }
-        
+
         println!("MCP server '{}' stopped successfully", server_name);
         Ok(())
     }
@@ -912,11 +915,11 @@ impl McpBridge {
     async fn start_health_monitor(&self, server_name: &str) -> Result<(), String> {
         let servers = self.servers.clone();
         let server_name = server_name.to_string();
-        
+
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(30)).await;
-                
+
                 let (should_check, process_handle) = {
                     let mut servers_guard = servers.lock().unwrap();
                     if let Some(server) = servers_guard.get_mut(&server_name) {
@@ -930,12 +933,12 @@ impl McpBridge {
                         (false, None) // Server removed, exit monitoring
                     }
                 };
-                
+
                 if !should_check {
                     println!("Health monitor for MCP server '{}' stopping", server_name);
                     break;
                 }
-                
+
                 // Check if process is still alive
                 if let Some(process_handle) = process_handle {
                     let is_alive = {
@@ -952,7 +955,7 @@ impl McpBridge {
                             }
                         }
                     };
-                    
+
                     if !is_alive {
                         // Mark server as not running
                         let mut servers_guard = servers.lock().unwrap();
@@ -968,7 +971,82 @@ impl McpBridge {
                 }
             }
         });
-        
+
         Ok(())
     }
+}
+
+#[tauri::command]
+pub async fn start_persistent_mcp_server(
+    app: tauri::AppHandle,
+    name: String,
+    command: String,
+    args: Vec<String>,
+) -> Result<(), String> {
+    let bridge_state = app.state::<McpBridgeState>();
+    bridge_state.0.start_mcp_server(name, command, args).await
+}
+
+#[tauri::command]
+pub async fn stop_persistent_mcp_server(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    let bridge_state = app.state::<McpBridgeState>();
+    bridge_state.0.stop_server(&name).await
+}
+
+#[tauri::command]
+pub async fn get_mcp_tools(app: tauri::AppHandle) -> Result<Vec<(String, McpTool)>, String> {
+    let bridge_state = app.state::<McpBridgeState>();
+    Ok(bridge_state.0.get_all_tools())
+}
+
+#[tauri::command]
+pub async fn get_mcp_server_status(app: tauri::AppHandle) -> Result<std::collections::HashMap<String, bool>, String> {
+    let bridge_state = app.state::<McpBridgeState>();
+    Ok(bridge_state.0.get_server_status())
+}
+
+#[tauri::command]
+pub async fn execute_mcp_tool(
+    app: tauri::AppHandle,
+    server_name: String,
+    tool_name: String,
+    arguments: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let bridge_state = app.state::<McpBridgeState>();
+    bridge_state.0.execute_tool(&server_name, &tool_name, arguments).await
+}
+
+#[tauri::command]
+pub async fn debug_mcp_bridge(app: tauri::AppHandle) -> Result<String, String> {
+    let bridge_state = app.state::<McpBridgeState>();
+    let tools = bridge_state.0.get_all_tools();
+    let statuses = bridge_state.0.get_server_status();
+
+    let mut debug_info = String::new();
+    debug_info.push_str(&format!("=== MCP Bridge Debug ===\n"));
+    debug_info.push_str(&format!("Server Count: {}\n", statuses.len()));
+    debug_info.push_str(&format!("Total Tools: {}\n\n", tools.len()));
+
+    debug_info.push_str("=== Server Status ===\n");
+    for (server_name, is_running) in &statuses {
+        debug_info.push_str(&format!("{}: {}\n", server_name, if *is_running { "🟢 Running" } else { "🔴 Stopped" }));
+    }
+
+    debug_info.push_str("\n=== Discovered Tools ===\n");
+    if tools.is_empty() {
+        debug_info.push_str("❌ No tools discovered\n");
+    } else {
+        for (server_name, tool) in &tools {
+            debug_info.push_str(&format!("Server '{}': Tool '{}'\n", server_name, tool.name));
+            if let Some(desc) = &tool.description {
+                debug_info.push_str(&format!("  Description: {}\n", desc));
+            }
+            debug_info.push_str(&format!("  Schema: {}\n", tool.input_schema));
+        }
+    }
+
+    debug_info.push_str("\n=== Detailed Server Info ===\n");
+    debug_info.push_str(&format!("{:#?}", bridge_state.0.get_debug_server_info()));
+
+    Ok(debug_info)
 }
