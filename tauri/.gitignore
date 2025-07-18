@@ -25,3 +25,7 @@ mcp_servers.db
 src-tauri/mcp_servers.db
 src-tauri/mcp_servers.db-shm
 src-tauri/mcp_servers.db-wal
+
+# Serena and Claude files
+.serena/
+CLAUDE.md
