@@ -42,7 +42,7 @@ interface MCPCatalogsProps {
   mcpServerStatuses: { [key: string]: boolean };
 }
 
-export default function MCPCatalogs({
+export function MCPCatalog({
   mcpServers,
   setMcpServers,
   mcpServerStatus,

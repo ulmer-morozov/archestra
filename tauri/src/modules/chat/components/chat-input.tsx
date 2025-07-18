@@ -1,6 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { PaperclipIcon, MicIcon } from "lucide-react";
+
+import { useFetchOllamaModels } from "../hooks/use-fetch-ollama-models";
+
 import {
   AIInput,
   AIInputTextarea,
@@ -14,17 +18,15 @@ import {
   AIInputModelSelectItem,
   AIInputModelSelectValue,
 } from "../../../components/kibo/ai-input";
-import { PaperclipIcon, MicIcon } from "lucide-react";
-import { useFetchOllamaModels } from "../hooks/use-fetch-ollama-models";
 
-interface SimpleChatInputProps {
+interface ChatInputProps {
   ollamaPort: number | null;
   clearChatHistory: () => void;
   onSubmit: (message: string, model: string) => Promise<void>;
   disabled: boolean;
 }
 
-export function ChatInput({ onSubmit, clearChatHistory, disabled, ollamaPort }: SimpleChatInputProps) {
+export function ChatInput({ onSubmit, clearChatHistory, disabled, ollamaPort }: ChatInputProps) {
   const [message, setMessage] = useState("");
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [status, setStatus] = useState<"submitted" | "streaming" | "ready" | "error">("ready");

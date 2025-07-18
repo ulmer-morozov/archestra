@@ -1,3 +1,4 @@
+import { useOllamaServer } from "../contexts/ollama-server-context";
 import { usePostChatMessage } from "../hooks/use-post-chat-message";
 
 import { ChatInput } from "./chat-input";
@@ -19,11 +20,12 @@ interface MCPTool {
 }
 
 interface ChatContainerProps {
-  ollamaPort: number | null;
   mcpTools: MCPTool[];
 }
 
-export default function ChatContainer({ ollamaPort, mcpTools }: ChatContainerProps) {
+export function ChatContainer({ mcpTools }: ChatContainerProps) {
+  const { ollamaPort } = useOllamaServer();
+
   const { chatHistory, isChatLoading, sendChatMessage, clearChatHistory } = usePostChatMessage({
     ollamaPort,
     mcpTools,

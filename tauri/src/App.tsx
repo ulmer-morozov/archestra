@@ -1,13 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useState, useRef, useEffect } from "react";
-import { CheckCircle, XCircle, MessageCircle, Bot, Bug } from "lucide-react";
+import { MessageCircle, Bot, Bug } from "lucide-react";
 
-import { useOllamaServer } from "./modules/chat/hooks/use-ollama-server";
+import { useOllamaServer } from "./modules/chat/contexts/ollama-server-context";
 
 import { Button } from "./components/ui/button";
 import { ScrollArea } from "./components/ui/scroll-area";
-import ChatContainer from "./modules/chat/components/chat-container";
-import MCPCatalogs from "./modules/mcp-catalog/components/mcp-catalogs";
+import { ChatContainer } from "./modules/chat/components/chat-container";
+import { MCPCatalog } from "./modules/mcp-catalog/components/mcp-catalog";
+import { OllamaServerCard } from "./modules/chat/components/ollama-server-card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 
@@ -39,11 +40,9 @@ function App() {
   const [activeTab, setActiveTab] = useState<"chat" | "mcp">("chat");
   const [debugInfo, setDebugInfo] = useState<string>("");
 
-  const debugRef = useRef<HTMLDivElement>(null);
+  const { isOllamaRunning } = useOllamaServer();
 
-  // Use the consolidated Ollama server hook
-  const { ollamaStatus, isOllamaRunning, ollamaPort, isStarting, isStopping, startOllamaServer, stopOllamaServer } =
-    useOllamaServer(autoStartMcpServers);
+  const debugRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadMcpServersFromDb();
@@ -56,6 +55,12 @@ function App() {
 
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (isOllamaRunning) {
+      autoStartMcpServers();
+    }
+  }, [isOllamaRunning]);
 
   async function loadMcpServersFromDb() {
     try {
@@ -171,6 +176,8 @@ function App() {
     }
   }
 
+  console.log({ mcpServers });
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="container mx-auto px-4 py-8 max-w-6xl">
@@ -185,94 +192,29 @@ function App() {
           onValueChange={(value: string) => setActiveTab(value as "chat" | "mcp")}
           className="mb-6"
         >
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="chat" className="flex items-center gap-2">
-              <MessageCircle className="h-4 w-4" />
-              Chat with AI
-            </TabsTrigger>
-            <TabsTrigger value="mcp" className="flex items-center gap-2">
-              <Bot className="h-4 w-4" />
-              MCP Catalogs
-            </TabsTrigger>
-          </TabsList>
+          <div className="flex items-center gap-2">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="chat" className="flex items-center gap-2">
+                <MessageCircle className="h-4 w-4" />
+                Chat with AI
+              </TabsTrigger>
+
+              <TabsTrigger value="mcp" className="flex items-center gap-2">
+                <Bot className="h-4 w-4" />
+                MCP Catalogs
+              </TabsTrigger>
+            </TabsList>
+
+            <Button onClick={debugMcpBridge} variant="outline" className="flex items-center gap-2">
+              <Bug className="h-4 w-4" />
+              Debug MCP Bridge
+            </Button>
+          </div>
 
           <TabsContent value="chat" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Bot className="h-5 w-5" />
-                  Ollama Local AI
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex gap-2">
-                  {!isOllamaRunning ? (
-                    <Button
-                      onClick={startOllamaServer}
-                      disabled={isStarting || isStopping}
-                      className="flex items-center gap-2"
-                    >
-                      {isStarting ? (
-                        <>
-                          <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                          Starting...
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle className="h-4 w-4" />
-                          Start Ollama Server
-                        </>
-                      )}
-                    </Button>
-                  ) : (
-                    <Button
-                      onClick={stopOllamaServer}
-                      disabled={isStarting || isStopping}
-                      variant="destructive"
-                      className="flex items-center gap-2"
-                    >
-                      {isStopping ? (
-                        <>
-                          <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                          Stopping...
-                        </>
-                      ) : (
-                        <>
-                          <XCircle className="h-4 w-4" />
-                          Stop Ollama Server
-                        </>
-                      )}
-                    </Button>
-                  )}
-                  <Button onClick={debugMcpBridge} variant="outline" className="flex items-center gap-2">
-                    <Bug className="h-4 w-4" />
-                    Debug MCP Bridge
-                  </Button>
-                </div>
+            <OllamaServerCard />
 
-                {ollamaStatus && (
-                  <div
-                    className={`p-3 rounded-md text-sm ${
-                      ollamaStatus.includes("Error")
-                        ? "bg-destructive/10 text-destructive border border-destructive/20"
-                        : ollamaStatus.includes("successfully")
-                        ? "bg-green-500/10 text-green-600 border border-green-500/20"
-                        : "bg-muted text-muted-foreground border"
-                    }`}
-                  >
-                    {ollamaStatus}
-                  </div>
-                )}
-
-                {ollamaPort && (
-                  <div className="p-3 rounded-md bg-green-500/10 text-green-600 border border-green-500/20 text-sm">
-                    Ollama running on port: {ollamaPort}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <ChatContainer ollamaPort={ollamaPort} mcpTools={mcpTools} />
+            <ChatContainer mcpTools={mcpTools} />
 
             {debugInfo && (
               <Card ref={debugRef}>
@@ -294,7 +236,7 @@ function App() {
           </TabsContent>
 
           <TabsContent value="mcp">
-            <MCPCatalogs
+            <MCPCatalog
               mcpServers={mcpServers}
               setMcpServers={setMcpServers}
               mcpServerStatus={mcpServerStatus}

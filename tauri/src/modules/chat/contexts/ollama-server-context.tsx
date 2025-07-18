@@ -1,7 +1,9 @@
-import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+"use client";
 
-interface UseOllamaServerReturn {
+import { invoke } from "@tauri-apps/api/core";
+import { createContext, useContext, useState, ReactNode } from "react";
+
+interface IOllamaServerContext {
   ollamaStatus: string;
   isOllamaRunning: boolean;
   ollamaPort: number | null;
@@ -15,7 +17,13 @@ interface UseOllamaServerReturn {
   setOllamaStatus: (status: string) => void;
 }
 
-export function useOllamaServer(onServerStarted?: () => void): UseOllamaServerReturn {
+const OllamaServerContext = createContext<IOllamaServerContext | null>(null);
+
+interface OllamaServerProviderProps {
+  children: ReactNode;
+}
+
+export function OllamaServerProvider({ children }: OllamaServerProviderProps) {
   const [ollamaStatus, setOllamaStatus] = useState("");
   const [isOllamaRunning, setIsOllamaRunning] = useState(false);
   const [ollamaPort, setOllamaPort] = useState<number | null>(null);
@@ -46,13 +54,6 @@ export function useOllamaServer(onServerStarted?: () => void): UseOllamaServerRe
       setOllamaPort(port);
       setIsOllamaRunning(true);
       setOllamaStatus(`Ollama server started successfully on port ${port}`);
-
-      // Call the callback if provided (for auto-starting MCP servers)
-      if (onServerStarted) {
-        setTimeout(() => {
-          onServerStarted();
-        }, 2000);
-      }
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : JSON.stringify(error);
       const errorMessage = `Error starting Ollama: ${errorMsg}`;
@@ -98,7 +99,7 @@ export function useOllamaServer(onServerStarted?: () => void): UseOllamaServerRe
     }
   };
 
-  return {
+  const contextValue: IOllamaServerContext = {
     // State
     ollamaStatus,
     isOllamaRunning,
@@ -113,4 +114,14 @@ export function useOllamaServer(onServerStarted?: () => void): UseOllamaServerRe
     stopOllamaServer,
     setOllamaStatus,
   };
+
+  return <OllamaServerContext.Provider value={contextValue}>{children}</OllamaServerContext.Provider>;
+}
+
+export function useOllamaServer(): IOllamaServerContext {
+  const context = useContext(OllamaServerContext);
+  if (!context) {
+    throw new Error("useOllamaServer must be used within a OllamaServerProvider.");
+  }
+  return context;
 }
