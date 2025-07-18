@@ -32,6 +32,12 @@ export function ChatInput({ onSubmit, clearChatHistory, disabled, ollamaPort }: 
   const { data: availableModels = [], isLoading: modelsLoading, isError } = useFetchOllamaModels({ ollamaPort });
 
   useEffect(() => {
+    if (!ollamaPort) {
+      setSelectedModel("");
+    }
+  }, [ollamaPort]);
+
+  useEffect(() => {
     if (availableModels.length > 0 && !selectedModel) {
       setSelectedModel(availableModels[0]);
     }
@@ -82,6 +88,8 @@ export function ChatInput({ onSubmit, clearChatHistory, disabled, ollamaPort }: 
     setSelectedModel(modelName);
     clearChatHistory();
   };
+
+  console.log({ selectedModel, ollamaPort });
 
   return (
     <AIInput onSubmit={handleSubmit} className="bg-inherit">
