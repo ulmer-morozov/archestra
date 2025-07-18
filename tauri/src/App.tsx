@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { useState, useRef, useEffect } from "react";
 import { CheckCircle, XCircle, MessageCircle, Bot, Bug } from "lucide-react";
 
+import { useOllamaServer } from "./modules/chat/hooks/use-ollama-server";
+
 import { Button } from "./components/ui/button";
 import { ScrollArea } from "./components/ui/scroll-area";
 import ChatContainer from "./modules/chat/components/chat-container";
@@ -12,10 +14,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import "./index.css";
 
 function App() {
-  const [ollamaStatus, setOllamaStatus] = useState("");
-  const [isOllamaRunning, setIsOllamaRunning] = useState(false);
-  const [ollamaPort, setOllamaPort] = useState<number | null>(null);
-
   const [mcpServers, setMcpServers] = useState<{
     [key: string]: { command: string; args: string[] };
   }>({});
@@ -42,6 +40,10 @@ function App() {
   const [debugInfo, setDebugInfo] = useState<string>("");
 
   const debugRef = useRef<HTMLDivElement>(null);
+
+  // Use the consolidated Ollama server hook
+  const { ollamaStatus, isOllamaRunning, ollamaPort, isStarting, isStopping, startOllamaServer, stopOllamaServer } =
+    useOllamaServer(autoStartMcpServers);
 
   useEffect(() => {
     loadMcpServersFromDb();
@@ -169,51 +171,6 @@ function App() {
     }
   }
 
-  async function runOllamaServe() {
-    console.log("runOllamaServe called, isOllamaRunning:", isOllamaRunning);
-
-    // Prevent multiple starts
-    if (isOllamaRunning) {
-      setOllamaStatus("Ollama server is already running");
-      return;
-    }
-
-    try {
-      setOllamaStatus("Starting Ollama server...");
-      const port = await invoke<number>("start_ollama_server");
-      setOllamaPort(port);
-      setIsOllamaRunning(true);
-      setOllamaStatus(`Ollama server started successfully on port ${port}`);
-
-      // Wait a moment for the server to start, then start MCP servers
-      setTimeout(() => {
-        autoStartMcpServers();
-      }, 2000);
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : JSON.stringify(error);
-      setOllamaStatus(`Error starting Ollama: ${errorMsg}`);
-      setIsOllamaRunning(false);
-      console.error("Error starting Ollama:", error);
-    }
-  }
-
-  async function stopOllamaServe() {
-    setOllamaStatus("Stopping Ollama server...");
-
-    try {
-      await invoke("stop_ollama_server");
-      setIsOllamaRunning(false);
-      setOllamaPort(null);
-      setOllamaStatus("Ollama server stopped");
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : JSON.stringify(error);
-      setOllamaStatus(`Error stopping Ollama: ${errorMsg}`);
-      console.error("Error stopping Ollama:", error);
-      setIsOllamaRunning(false);
-      setOllamaPort(null);
-    }
-  }
-
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="container mx-auto px-4 py-8 max-w-6xl">
@@ -250,14 +207,41 @@ function App() {
               <CardContent className="space-y-4">
                 <div className="flex gap-2">
                   {!isOllamaRunning ? (
-                    <Button onClick={runOllamaServe} className="flex items-center gap-2">
-                      <CheckCircle className="h-4 w-4" />
-                      Start Ollama Server
+                    <Button
+                      onClick={startOllamaServer}
+                      disabled={isStarting || isStopping}
+                      className="flex items-center gap-2"
+                    >
+                      {isStarting ? (
+                        <>
+                          <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                          Starting...
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle className="h-4 w-4" />
+                          Start Ollama Server
+                        </>
+                      )}
                     </Button>
                   ) : (
-                    <Button onClick={stopOllamaServe} variant="destructive" className="flex items-center gap-2">
-                      <XCircle className="h-4 w-4" />
-                      Stop Ollama Server
+                    <Button
+                      onClick={stopOllamaServer}
+                      disabled={isStarting || isStopping}
+                      variant="destructive"
+                      className="flex items-center gap-2"
+                    >
+                      {isStopping ? (
+                        <>
+                          <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                          Stopping...
+                        </>
+                      ) : (
+                        <>
+                          <XCircle className="h-4 w-4" />
+                          Stop Ollama Server
+                        </>
+                      )}
                     </Button>
                   )}
                   <Button onClick={debugMcpBridge} variant="outline" className="flex items-center gap-2">
