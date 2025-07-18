@@ -15,85 +15,56 @@ import {
   AIInputModelSelectValue,
 } from "../../../components/kibo/ai-input";
 import { PaperclipIcon, MicIcon } from "lucide-react";
-import { NoModelFound } from "./no-model-found";
+import { useFetchOllamaModels } from "../hooks/use-fetch-ollama-models";
 
 interface SimpleChatInputProps {
   onSubmit: (message: string, model: string) => Promise<void>;
   onModelChange?: (modelName: string) => void;
   disabled?: boolean;
-  ollamaPort?: number | null;
+  ollamaPort: number | null;
+  availableModels?: string[];
+  selectedModel?: string | null;
+  modelsLoading?: boolean;
 }
 
-interface OllamaModel {
-  name: string;
-  modified_at: string;
-  size: number;
-  digest: string;
-  details: {
-    format: string;
-    family: string;
-    parameter_size: string;
-    quantization_level: string;
-  };
-}
-
-interface OllamaResponse {
-  models: OllamaModel[];
-}
-
-export function ChatInput({ onSubmit, onModelChange, disabled = false, ollamaPort }: SimpleChatInputProps) {
+export function ChatInput({
+  onSubmit,
+  onModelChange,
+  disabled = false,
+  ollamaPort,
+  selectedModel,
+}: SimpleChatInputProps) {
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState<"submitted" | "streaming" | "ready" | "error">("ready");
-  const [models, setModels] = useState<OllamaModel[]>([]);
-  const [modelsLoading, setModelsLoading] = useState(true);
-  const [modelsError, setModelsError] = useState<string | null>(null);
-  const [selectedModel, setSelectedModel] = useState<string>("");
+  const [selectedModelState, setSelectedModel] = useState<string>(selectedModel || "");
 
-  const fetchModels = async () => {
-    try {
-      setModelsLoading(true);
-      setModelsError(null);
-
-      const port = ollamaPort || 11434;
-      const response = await fetch(`http://localhost:${port}/api/tags`);
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch models: ${response.status}`);
-      }
-
-      const data: OllamaResponse = await response.json();
-      setModels(data.models);
-      if (data.models.length > 0 && !selectedModel) {
-        setSelectedModel(data.models[0].name);
-      }
-    } catch (error) {
-      console.error("Error fetching Ollama models:", error);
-      setModelsError("Failed to fetch local models. Make sure Ollama is running.");
-      setModels([]);
-    } finally {
-      setModelsLoading(false);
-    }
-  };
+  const { data: availableModels = [], isLoading: modelsLoading, isError } = useFetchOllamaModels({ ollamaPort });
 
   useEffect(() => {
-    if (ollamaPort) {
-      fetchModels();
+    if (availableModels.length > 0 && !selectedModel) {
+      setSelectedModel(availableModels[0]);
     }
-  }, [selectedModel, ollamaPort]);
+  }, [availableModels, selectedModel]);
+
+  useEffect(() => {
+    if (selectedModel && selectedModel !== selectedModelState) {
+      setSelectedModel(selectedModel);
+    }
+  }, [selectedModel, selectedModelState]);
 
   const handleSubmit = async (e?: React.FormEvent<HTMLFormElement>) => {
     if (e) {
       e.preventDefault();
     }
 
-    if (!message.trim() || disabled || !selectedModel) {
+    if (!message.trim() || disabled || !selectedModelState) {
       return;
     }
 
     setStatus("submitted");
 
     try {
-      await onSubmit(message.trim(), selectedModel);
+      await onSubmit(message.trim(), selectedModelState);
       setMessage("");
       setStatus("ready");
     } catch (error) {
@@ -127,22 +98,10 @@ export function ChatInput({ onSubmit, onModelChange, disabled = false, ollamaPor
     onModelChange?.(modelName);
   };
 
-  const formatModelDisplayName = (model: OllamaModel) => {
-    const name = model.name;
-    const paramSize = model.details.parameter_size;
-    return paramSize ? `${name} (${paramSize})` : name;
+  const formatModelDisplayName = (model: string) => {
+    const name = model;
+    return name;
   };
-
-  if (modelsError || (!modelsLoading && models.length === 0)) {
-    return (
-      <div className="m-3">
-        <NoModelFound
-          error={modelsError || "No models found. Please ensure Ollama is running and has models installed."}
-          onRetry={fetchModels}
-        />
-      </div>
-    );
-  }
 
   return (
     <AIInput onSubmit={handleSubmit} className="bg-inherit">
@@ -158,26 +117,26 @@ export function ChatInput({ onSubmit, onModelChange, disabled = false, ollamaPor
       <AIInputToolbar>
         <AIInputTools>
           <AIInputModelSelect
-            value={selectedModel}
+            value={selectedModelState}
             onValueChange={handleModelChange}
-            disabled={modelsLoading || modelsError !== null}
+            disabled={modelsLoading || isError || !ollamaPort}
           >
             <AIInputModelSelectTrigger>
               <AIInputModelSelectValue
                 placeholder={
                   modelsLoading
                     ? "Loading models..."
-                    : modelsError
+                    : isError
                     ? "Error loading models"
-                    : models.length === 0
+                    : availableModels.length === 0
                     ? "No models found"
                     : "Select a model"
                 }
               />
             </AIInputModelSelectTrigger>
             <AIInputModelSelectContent>
-              {models.map((model) => (
-                <AIInputModelSelectItem key={model.name} value={model.name}>
+              {availableModels.map((model) => (
+                <AIInputModelSelectItem key={model} value={model}>
                   {formatModelDisplayName(model)}
                 </AIInputModelSelectItem>
               ))}

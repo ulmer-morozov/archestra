@@ -1,18 +1,23 @@
-import { useState, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import MCPCatalogs from "./modules/mcp-catalog/components/mcp-catalogs";
-import ChatContainer from "./modules/chat/components/chat-container";
-import { Button } from "./components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
-import { ScrollArea } from "./components/ui/scroll-area";
+import { useState, useRef, useEffect } from "react";
 import { CheckCircle, XCircle, MessageCircle, Bot, Bug } from "lucide-react";
+
+import { Button } from "./components/ui/button";
+import { ScrollArea } from "./components/ui/scroll-area";
+import ChatContainer from "./modules/chat/components/chat-container";
+import MCPCatalogs from "./modules/mcp-catalog/components/mcp-catalogs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./components/ui/tabs";
+import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
+
 import "./index.css";
 
 function App() {
-  const [ollamaPort, setOllamaPort] = useState<number | null>(null);
   const [ollamaStatus, setOllamaStatus] = useState("");
   const [isOllamaRunning, setIsOllamaRunning] = useState(false);
+  const [ollamaPort, setOllamaPort] = useState<number | null>(null);
+
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+
   const [mcpServers, setMcpServers] = useState<{
     [key: string]: { command: string; args: string[] };
   }>({});
@@ -285,7 +290,12 @@ function App() {
               </CardContent>
             </Card>
 
-            <ChatContainer ollamaPort={ollamaPort} mcpTools={mcpTools} />
+            <ChatContainer
+              ollamaPort={ollamaPort}
+              mcpTools={mcpTools}
+              selectedModel={selectedModel}
+              onModelChange={setSelectedModel}
+            />
 
             {debugInfo && (
               <Card ref={debugRef}>

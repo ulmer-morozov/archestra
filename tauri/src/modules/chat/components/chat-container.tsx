@@ -32,12 +32,23 @@ interface MCPTool {
 interface ChatContainerProps {
   ollamaPort: number | null;
   mcpTools: MCPTool[];
+  availableModels?: string[];
+  selectedModel?: string | null;
+  onModelChange?: (model: string) => void;
+  modelsLoading?: boolean;
 }
 
-export default function ChatContainer({ ollamaPort, mcpTools }: ChatContainerProps) {
+export default function ChatContainer({
+  ollamaPort,
+  mcpTools,
+  availableModels,
+  selectedModel,
+  onModelChange,
+  modelsLoading,
+}: ChatContainerProps) {
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [chatLoading, setChatLoading] = useState(false);
-  const [currentModel, setCurrentModel] = useState<string>("");
+  const [currentModel, setCurrentModel] = useState<string>(selectedModel || "");
 
   const clearChatHistory = useCallback(() => {
     setChatHistory([]);
@@ -49,8 +60,9 @@ export default function ChatContainer({ ollamaPort, mcpTools }: ChatContainerPro
         clearChatHistory();
       }
       setCurrentModel(newModel);
+      onModelChange?.(newModel);
     },
-    [currentModel, chatHistory.length, clearChatHistory]
+    [currentModel, chatHistory.length, clearChatHistory, onModelChange]
   );
 
   async function sendChatMessage(message: string, model: string) {
@@ -320,14 +332,15 @@ export default function ChatContainer({ ollamaPort, mcpTools }: ChatContainerPro
           </div>
         </ScrollArea>
 
-        {ollamaPort && (
-          <ChatInput
-            onSubmit={sendChatMessage}
-            disabled={chatLoading || !ollamaPort}
-            ollamaPort={ollamaPort}
-            onModelChange={handleModelChange}
-          />
-        )}
+        <ChatInput
+          onSubmit={sendChatMessage}
+          disabled={chatLoading || !ollamaPort}
+          ollamaPort={ollamaPort}
+          onModelChange={handleModelChange}
+          availableModels={availableModels}
+          selectedModel={currentModel}
+          modelsLoading={modelsLoading}
+        />
       </CardContent>
     </Card>
   );
