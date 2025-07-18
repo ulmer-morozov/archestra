@@ -18,25 +18,16 @@ import { PaperclipIcon, MicIcon } from "lucide-react";
 import { useFetchOllamaModels } from "../hooks/use-fetch-ollama-models";
 
 interface SimpleChatInputProps {
-  onSubmit: (message: string, model: string) => Promise<void>;
-  onModelChange?: (modelName: string) => void;
-  disabled?: boolean;
   ollamaPort: number | null;
-  availableModels?: string[];
-  selectedModel?: string | null;
-  modelsLoading?: boolean;
+  clearChatHistory: () => void;
+  onSubmit: (message: string, model: string) => Promise<void>;
+  disabled: boolean;
 }
 
-export function ChatInput({
-  onSubmit,
-  onModelChange,
-  disabled = false,
-  ollamaPort,
-  selectedModel,
-}: SimpleChatInputProps) {
+export function ChatInput({ onSubmit, clearChatHistory, disabled, ollamaPort }: SimpleChatInputProps) {
   const [message, setMessage] = useState("");
+  const [selectedModel, setSelectedModel] = useState<string>("");
   const [status, setStatus] = useState<"submitted" | "streaming" | "ready" | "error">("ready");
-  const [selectedModelState, setSelectedModel] = useState<string>(selectedModel || "");
 
   const { data: availableModels = [], isLoading: modelsLoading, isError } = useFetchOllamaModels({ ollamaPort });
 
@@ -46,25 +37,19 @@ export function ChatInput({
     }
   }, [availableModels, selectedModel]);
 
-  useEffect(() => {
-    if (selectedModel && selectedModel !== selectedModelState) {
-      setSelectedModel(selectedModel);
-    }
-  }, [selectedModel, selectedModelState]);
-
   const handleSubmit = async (e?: React.FormEvent<HTMLFormElement>) => {
     if (e) {
       e.preventDefault();
     }
 
-    if (!message.trim() || disabled || !selectedModelState) {
+    if (!message.trim() || disabled || !selectedModel) {
       return;
     }
 
     setStatus("submitted");
 
     try {
-      await onSubmit(message.trim(), selectedModelState);
+      await onSubmit(message.trim(), selectedModel);
       setMessage("");
       setStatus("ready");
     } catch (error) {
@@ -95,12 +80,7 @@ export function ChatInput({
 
   const handleModelChange = (modelName: string) => {
     setSelectedModel(modelName);
-    onModelChange?.(modelName);
-  };
-
-  const formatModelDisplayName = (model: string) => {
-    const name = model;
-    return name;
+    clearChatHistory();
   };
 
   return (
@@ -117,7 +97,7 @@ export function ChatInput({
       <AIInputToolbar>
         <AIInputTools>
           <AIInputModelSelect
-            value={selectedModelState}
+            value={selectedModel}
             onValueChange={handleModelChange}
             disabled={modelsLoading || isError || !ollamaPort}
           >
@@ -137,7 +117,7 @@ export function ChatInput({
             <AIInputModelSelectContent>
               {availableModels.map((model) => (
                 <AIInputModelSelectItem key={model} value={model}>
-                  {formatModelDisplayName(model)}
+                  {model}
                 </AIInputModelSelectItem>
               ))}
             </AIInputModelSelectContent>

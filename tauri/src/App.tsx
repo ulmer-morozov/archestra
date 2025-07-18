@@ -16,8 +16,6 @@ function App() {
   const [isOllamaRunning, setIsOllamaRunning] = useState(false);
   const [ollamaPort, setOllamaPort] = useState<number | null>(null);
 
-  const [selectedModel, setSelectedModel] = useState<string | null>(null);
-
   const [mcpServers, setMcpServers] = useState<{
     [key: string]: { command: string; args: string[] };
   }>({});
@@ -290,12 +288,7 @@ function App() {
               </CardContent>
             </Card>
 
-            <ChatContainer
-              ollamaPort={ollamaPort}
-              mcpTools={mcpTools}
-              selectedModel={selectedModel}
-              onModelChange={setSelectedModel}
-            />
+            <ChatContainer ollamaPort={ollamaPort} mcpTools={mcpTools} />
 
             {debugInfo && (
               <Card ref={debugRef}>
