@@ -91,8 +91,6 @@ export function ChatInput({ onSubmit, clearChatHistory, disabled, ollamaPort }: 
     clearChatHistory();
   };
 
-  console.log({ selectedModel, ollamaPort });
-
   return (
     <AIInput onSubmit={handleSubmit} className="bg-inherit">
       <AIInputTextarea

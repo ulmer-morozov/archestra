@@ -9,6 +9,21 @@ interface IChatMessage {
   timestamp: Date;
   isStreaming?: boolean;
   isThinkingStreaming?: boolean;
+  toolCalls?: ToolCallInfo[];
+  isToolExecuting?: boolean;
+}
+
+interface ToolCallInfo {
+  id: string;
+  serverName: string;
+  toolName: string;
+  arguments: Record<string, any>;
+  result?: string;
+  error?: string;
+  status: "pending" | "executing" | "completed" | "error";
+  executionTime?: number;
+  startTime: Date;
+  endTime?: Date;
 }
 
 interface MCPTool {
@@ -68,9 +83,35 @@ export function usePostChatMessage({ ollamaPort, mcpTools }: IArgs) {
             model.includes("mistral") ||
             model.includes("command") ||
             model.includes("qwen") ||
-            model.includes("hermes"));
+            model.includes("hermes") ||
+            model.includes("llama3") ||
+            model.includes("llama-3") ||
+            model.includes("phi") ||
+            model.includes("granite"));
+
+        console.log("🔧 Tool calling debug:", {
+          mcpToolsCount: mcpTools.length,
+          modelSupportsTools,
+          model,
+          willUseMcpTools: mcpTools.length > 0 && modelSupportsTools,
+        });
 
         if (mcpTools.length > 0 && modelSupportsTools) {
+          console.log("🎯 Using tool-enabled chat with", mcpTools.length, "tools");
+
+          // Mark AI message as tool executing
+          setChatHistory((prev) =>
+            prev.map((msg) =>
+              msg.id === aiMsgId
+                ? {
+                    ...msg,
+                    isToolExecuting: true,
+                    content: "🔧 Analyzing your request and preparing to execute tools...",
+                  }
+                : msg
+            )
+          );
+
           // Use the enhanced tool-enabled chat
           const messages = [{ role: "user", content: currentMessage, tool_calls: null }];
 
@@ -80,15 +121,51 @@ export function usePostChatMessage({ ollamaPort, mcpTools }: IArgs) {
             messages: messages,
           });
 
-          console.log("Tool-enabled response:", response);
+          console.log("🔧 Tool-enabled response received:", response);
+
+          let toolCallsInfo: ToolCallInfo[] = [];
 
           if (response.tool_results && response.tool_results.length > 0) {
-            // Add tool execution results to chat history
+            console.log("🛠️ Processing", response.tool_results.length, "tool results");
+
+            // Create tool call info from results
+            toolCallsInfo = response.tool_results.map((toolResult: any, index: number) => {
+              // Extract server and tool name from the content (assuming format from backend)
+              const toolId = `tool-${Date.now()}-${index}`;
+
+              return {
+                id: toolId,
+                serverName: "mcp", // Will be enhanced when backend provides more details
+                toolName: `tool-${index + 1}`,
+                arguments: {}, // Will be enhanced when backend provides arguments
+                result: toolResult.content,
+                status: "completed" as const,
+                executionTime: 0, // Will be enhanced with timing
+                startTime: new Date(),
+                endTime: new Date(),
+              };
+            });
+
+            // Update AI message with tool execution info
+            setChatHistory((prev) =>
+              prev.map((msg) =>
+                msg.id === aiMsgId
+                  ? {
+                      ...msg,
+                      isToolExecuting: false,
+                      toolCalls: toolCallsInfo,
+                      content: "Tools executed successfully. Processing results...",
+                    }
+                  : msg
+              )
+            );
+
+            // Add individual tool result messages for better visibility
             for (const toolResult of response.tool_results) {
               const toolMessage = {
                 id: (Date.now() + Math.random()).toString(),
                 role: "tool",
-                content: `Tool executed: ${toolResult.content}`,
+                content: `${toolResult.content}`,
                 timestamp: new Date(),
               };
               setChatHistory((prev) => [...prev, toolMessage]);
@@ -96,6 +173,7 @@ export function usePostChatMessage({ ollamaPort, mcpTools }: IArgs) {
           }
 
           if (response.message && response.message.content) {
+            console.log("💬 Setting AI response:", response.message.content);
             setChatHistory((prev) =>
               prev.map((msg) =>
                 msg.id === aiMsgId
@@ -103,12 +181,34 @@ export function usePostChatMessage({ ollamaPort, mcpTools }: IArgs) {
                       ...msg,
                       content: response.message.content,
                       isStreaming: false,
+                      isToolExecuting: false,
+                      toolCalls: toolCallsInfo,
+                    }
+                  : msg
+              )
+            );
+          } else {
+            console.warn("⚠️ No message content in tool-enabled response");
+            setChatHistory((prev) =>
+              prev.map((msg) =>
+                msg.id === aiMsgId
+                  ? {
+                      ...msg,
+                      content:
+                        toolCallsInfo.length > 0
+                          ? "Tools executed successfully, but no additional response was generated."
+                          : "Tool execution completed but no response received.",
+                      isStreaming: false,
+                      isToolExecuting: false,
+                      toolCalls: toolCallsInfo,
                     }
                   : msg
               )
             );
           }
         } else {
+          console.log("📡 Using streaming chat (tools disabled or model doesn't support tools)");
+
           // Add warning if tools are available but model doesn't support them
           if (mcpTools.length > 0 && !modelSupportsTools) {
             const warningMessage = {

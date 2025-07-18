@@ -7,8 +7,11 @@ import { ScrollArea } from "../../../components/ui/scroll-area";
 import { AIResponse } from "../../../components/kibo/ai-response";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card";
 import { AIReasoning, AIReasoningTrigger, AIReasoningContent } from "../../../components/kibo/ai-reasoning";
+import { ToolCallIndicator } from "./tool-call-indicator";
+import { ToolExecutionResult } from "./tool-execution-result";
 
 import { cn } from "../../../lib/utils";
+import { Wrench } from "lucide-react";
 
 interface MCPTool {
   serverName: string;
@@ -34,11 +37,34 @@ export function ChatContainer({ mcpTools }: ChatContainerProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Chat with Ollama</CardTitle>
+        <CardTitle className="flex items-center justify-between">
+          <span>Chat with Ollama</span>
+          {mcpTools.length > 0 && (
+            <div className="flex items-center gap-2">
+              <Wrench className="h-4 w-4 text-blue-600" />
+              <span className="text-sm text-muted-foreground">Tools Available</span>
+            </div>
+          )}
+        </CardTitle>
         {mcpTools.length > 0 && (
-          <Badge variant="outline" className="text-xs">
-            {mcpTools.length} MCP tool{mcpTools.length !== 1 ? "s" : ""} available
-          </Badge>
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(
+              mcpTools.reduce((acc, tool) => {
+                if (!acc[tool.serverName]) {
+                  acc[tool.serverName] = [];
+                }
+                acc[tool.serverName].push(tool.tool.name);
+                return acc;
+              }, {} as Record<string, string[]>)
+            ).map(([serverName, toolNames]) => (
+              <Badge key={serverName} variant="outline" className="text-xs">
+                {serverName}: {toolNames.length} tool{toolNames.length !== 1 ? "s" : ""}
+              </Badge>
+            ))}
+            <Badge variant="secondary" className="text-xs">
+              Total: {mcpTools.length}
+            </Badge>
+          </div>
         )}
       </CardHeader>
       <CardContent className="space-y-4">
@@ -67,19 +93,54 @@ export function ChatContainer({ mcpTools }: ChatContainerProps) {
                   <div className="text-sm whitespace-pre-wrap">{msg.content}</div>
                 ) : msg.role === "assistant" ? (
                   <div className="relative">
+                    {(msg.isToolExecuting || msg.toolCalls) && (
+                      <ToolCallIndicator toolCalls={msg.toolCalls || []} isExecuting={!!msg.isToolExecuting} />
+                    )}
+
+                    {msg.toolCalls && msg.toolCalls.length > 0 && (
+                      <div className="space-y-2 mb-4">
+                        {msg.toolCalls.map((toolCall) => (
+                          <ToolExecutionResult
+                            key={toolCall.id}
+                            serverName={toolCall.serverName}
+                            toolName={toolCall.toolName}
+                            arguments={toolCall.arguments}
+                            result={toolCall.result || ""}
+                            executionTime={toolCall.executionTime}
+                            status={toolCall.error ? "error" : "success"}
+                            error={toolCall.error}
+                          />
+                        ))}
+                      </div>
+                    )}
+
                     {msg.thinkingContent && (
                       <AIReasoning isStreaming={msg.isThinkingStreaming} className="mb-4">
                         <AIReasoningTrigger />
                         <AIReasoningContent>{msg.thinkingContent}</AIReasoningContent>
                       </AIReasoning>
                     )}
+
                     <AIResponse>{msg.content}</AIResponse>
-                    {msg.isStreaming && (
+
+                    {(msg.isStreaming || msg.isToolExecuting) && (
                       <div className="flex items-center space-x-2 mt-2">
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
-                        <p className="text-muted-foreground text-sm">Loading...</p>
+                        <p className="text-muted-foreground text-sm">
+                          {msg.isToolExecuting ? "Executing tools..." : "Loading..."}
+                        </p>
                       </div>
                     )}
+                  </div>
+                ) : msg.role === "tool" ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Wrench className="h-4 w-4 text-blue-600" />
+                      <span className="text-sm font-medium text-blue-700 dark:text-blue-300">Tool Result</span>
+                    </div>
+                    <div className="p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
+                      <div className="text-sm whitespace-pre-wrap font-mono">{msg.content}</div>
+                    </div>
                   </div>
                 ) : (
                   <div className="text-sm whitespace-pre-wrap">{msg.content}</div>
