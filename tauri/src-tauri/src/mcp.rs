@@ -122,3 +122,32 @@ pub async fn delete_mcp_server(_app: tauri::AppHandle, name: String) -> Result<(
 
     Ok(())
 }
+
+pub async fn start_all_mcp_servers(app: tauri::AppHandle) -> Result<(), String> {
+    println!("Starting all persisted MCP servers...");
+
+    // Load all persisted MCP servers
+    let servers = load_mcp_servers(app.clone()).await?;
+
+    if servers.is_empty() {
+        println!("No persisted MCP servers found to start.");
+        return Ok(());
+    }
+
+    println!("Found {} MCP servers to start", servers.len());
+
+    // Start each server in the background
+    for (server_name, config) in servers {
+        let app_clone = app.clone();
+
+        tauri::async_runtime::spawn(async move {
+            match run_mcp_server_in_sandbox(app_clone, server_name, config).await {
+                Ok(result) => println!("MCP server started successfully: {}", result),
+                Err(e) => eprintln!("Failed to start MCP server: {}", e),
+            }
+        });
+    }
+
+    println!("All MCP servers have been queued for startup.");
+    Ok(())
+}
