@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "../../../components/ui/button";
 import { Input } from "../../../components/ui/input";
@@ -56,10 +56,77 @@ export function MCPCatalog({
   const [jsonImport, setJsonImport] = useState("");
   const [activeSection, setActiveSection] = useState<"none" | "import" | "add">("none");
   const [showGmailSetup, setShowGmailSetup] = useState(false);
-  const [gcpProject, setGcpProject] = useState("");
-  const [setupStep, setSetupStep] = useState(1);
+  const [gmailTokens, setGmailTokens] = useState<any>(null);
 
   const serverListRef = useRef<HTMLDivElement>(null);
+
+  // Check for existing Gmail tokens on component mount
+  useEffect(() => {
+    checkGmailTokens();
+
+    // Listen for OAuth callback messages
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data.type === 'GMAIL_AUTH_SUCCESS') {
+        handleOAuthSuccess(event.data.tokens);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+
+    // Check for tokens in localStorage (fallback)
+    const storedTokens = localStorage.getItem('gmail_tokens');
+    if (storedTokens) {
+      try {
+        const tokens = JSON.parse(storedTokens);
+        handleOAuthSuccess(tokens);
+        localStorage.removeItem('gmail_tokens'); // Clean up
+      } catch (error) {
+        console.error('Failed to parse stored tokens:', error);
+      }
+    }
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+    };
+  }, []);
+
+  async function checkGmailTokens() {
+    try {
+      const tokens = await invoke("load_gmail_tokens") as any;
+      setGmailTokens(tokens);
+    } catch (error) {
+      console.error("Failed to load Gmail tokens:", error);
+    }
+  }
+
+  async function handleOAuthSuccess(tokens: any) {
+    try {
+      // Save tokens to backend
+      await invoke("save_gmail_tokens", { tokens });
+
+      // Update local state
+      setGmailTokens(tokens);
+
+      // Add MCP server to the list
+      setMcpServers((prev) => ({
+        ...prev,
+        "Gmail MCP Server": {
+          command: "npx",
+          args: ["@gongrzhe/server-gmail-autoauth-mcp"],
+        },
+      }));
+
+      // Close the setup dialog
+      setShowGmailSetup(false);
+
+      // Show success message
+      alert("Gmail authentication successful! The MCP server has been configured and added to your list.");
+
+    } catch (error) {
+      console.error("Failed to save Gmail tokens:", error);
+      alert("Failed to save Gmail tokens. Please try again.");
+    }
+  }
 
   async function addMcpServer() {
     if (!currentServerName.trim()) {
@@ -222,42 +289,27 @@ export function MCPCatalog({
 
   async function setupGmailServer() {
     try {
-      await invoke("save_mcp_server", {
-        name: "Gmail MCP Server",
-        command: "npx",
-        args: ["@gongrzhe/server-gmail-autoauth-mcp"],
-      });
+      // Check if OAuth proxy is available
+      const proxyHealth = await invoke("check_oauth_proxy_health");
 
-      setMcpServers((prev) => ({
-        ...prev,
-        "Gmail MCP Server": {
-          command: "npx",
-          args: ["@gongrzhe/server-gmail-autoauth-mcp"],
-        },
-      }));
+      if (!proxyHealth) {
+        alert("OAuth proxy service is not running. Please start the OAuth proxy service first.");
+        return;
+      }
 
-      setShowGmailSetup(false);
-      setSetupStep(1);
-      alert("Gmail MCP Server has been configured successfully!");
+      // Start OAuth flow
+      const authResponse = await invoke("start_gmail_auth") as { auth_url: string };
+
+      // The browser will open automatically and handle the OAuth flow
+      // The callback will save tokens and close the setup dialog
+
     } catch (error) {
-      console.error("Failed to setup Gmail MCP server:", error);
-      alert("Failed to setup Gmail MCP server. Please try again.");
+      console.error("Failed to start Gmail auth:", error);
+      alert("Failed to start Gmail authentication. Please try again.");
     }
   }
 
-  const handleNextStep = () => {
-    if (setupStep < 4) {
-      setSetupStep(setupStep + 1);
-    } else {
-      setupGmailServer();
-    }
-  };
 
-  const handlePrevStep = () => {
-    if (setupStep > 1) {
-      setSetupStep(setupStep - 1);
-    }
-  };
 
   return (
     <div className="space-y-6">
@@ -272,23 +324,47 @@ export function MCPCatalog({
           <div className="grid gap-4">
             <Card className="border-2 border-dashed border-primary/20 bg-primary/5">
               <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-3">
-                    <div className="flex items-center gap-2">
-                      <Mail className="h-5 w-5 text-primary" />
-                      <h4 className="font-semibold">Gmail MCP Server</h4>
+                                  <div className="flex items-center justify-between">
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Mail className="h-5 w-5 text-primary" />
+                        <h4 className="font-semibold">Gmail MCP Server</h4>
+                      </div>
+                      <p className="text-sm text-muted-foreground">Access and manage your Gmail messages with AI</p>
+                      <div className="flex gap-2">
+                        <Badge variant="secondary">Email Management</Badge>
+                        {gmailTokens ? (
+                          <Badge variant="default" className="bg-green-500/10 text-green-600 border-green-500/20">
+                            ✅ Authenticated
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline">OAuth Required</Badge>
+                        )}
+                      </div>
                     </div>
-                    <p className="text-sm text-muted-foreground">Access and manage your Gmail messages with AI</p>
-                    <div className="flex gap-2">
-                      <Badge variant="secondary">Email Management</Badge>
-                      <Badge variant="outline">OAuth Required</Badge>
-                    </div>
+                    {gmailTokens ? (
+                      <Button
+                        onClick={() => {
+                          setMcpServers((prev) => ({
+                            ...prev,
+                            "Gmail MCP Server": {
+                              command: "npx",
+                              args: ["@gongrzhe/server-gmail-autoauth-mcp"],
+                            },
+                          }));
+                        }}
+                        className="flex items-center gap-2 bg-green-600 hover:bg-green-700"
+                      >
+                        <Plus className="h-4 w-4" />
+                        Add to MCP
+                      </Button>
+                    ) : (
+                      <Button onClick={() => setShowGmailSetup(true)} className="flex items-center gap-2">
+                        <Settings className="h-4 w-4" />
+                        Setup Gmail
+                      </Button>
+                    )}
                   </div>
-                  <Button onClick={() => setShowGmailSetup(true)} className="flex items-center gap-2">
-                    <Settings className="h-4 w-4" />
-                    Setup Gmail
-                  </Button>
-                </div>
               </CardContent>
             </Card>
           </div>
@@ -300,208 +376,37 @@ export function MCPCatalog({
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Mail className="h-5 w-5" />
-              Gmail MCP Server Setup
+              Gmail Authentication
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span>Setup Progress</span>
-                <span>Step {setupStep} of 4</span>
-              </div>
-              <div className="w-full bg-muted rounded-full h-2">
-                <div
-                  className="bg-primary h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${(setupStep / 4) * 100}%` }}
-                />
-              </div>
-            </div>
-
             <div className="space-y-4">
-              {setupStep === 1 && (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2">
-                    <div className="h-6 w-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-medium">
-                      1
-                    </div>
-                    <h4 className="font-semibold">Create Google Cloud Project</h4>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Create a new project in the{" "}
-                    <Button variant="link" className="p-0 h-auto" asChild>
-                      <a
-                        href="https://console.cloud.google.com/"
-                        target="_blank"
-                        className="inline-flex items-center gap-1"
-                      >
-                        Google Cloud Console
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    </Button>
-                  </p>
-                  <div className="space-y-2">
-                    <Label htmlFor="gcp-project">Project ID (optional - for reference)</Label>
-                    <Input
-                      id="gcp-project"
-                      value={gcpProject}
-                      onChange={(e) => setGcpProject(e.target.value)}
-                      placeholder="my-gmail-mcp-project"
-                    />
-                  </div>
-                  <Card className="bg-muted/50">
-                    <CardContent className="pt-6">
-                      <h5 className="font-medium mb-2">Instructions:</h5>
-                      <ol className="text-sm space-y-1 text-muted-foreground list-decimal list-inside">
-                        <li>Go to Google Cloud Console</li>
-                        <li>Click "New Project"</li>
-                        <li>Enter a project name</li>
-                        <li>Click "Create"</li>
-                      </ol>
-                    </CardContent>
-                  </Card>
-                </div>
-              )}
-
-              {setupStep === 2 && (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2">
-                    <div className="h-6 w-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-medium">
-                      2
-                    </div>
-                    <h4 className="font-semibold">Enable Gmail API</h4>
-                  </div>
-                  <Card className="bg-muted/50">
-                    <CardContent className="pt-6">
-                      <h5 className="font-medium mb-2">Instructions:</h5>
-                      <ol className="text-sm space-y-1 text-muted-foreground list-decimal list-inside">
-                        <li>Go to the APIs & Services dashboard</li>
-                        <li>Click "Enable APIs and Services"</li>
-                        <li>Search for "Gmail API"</li>
-                        <li>Click on Gmail API and then "Enable"</li>
-                      </ol>
-                    </CardContent>
-                  </Card>
-                  <Button variant="outline" asChild>
-                    <a
-                      href="https://console.cloud.google.com/apis/library/gmail.googleapis.com"
-                      target="_blank"
-                      className="inline-flex items-center gap-2"
-                    >
-                      <ExternalLink className="h-4 w-4" />
-                      Direct link to Gmail API
-                    </a>
-                  </Button>
-                </div>
-              )}
-
-              {setupStep === 3 && (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2">
-                    <div className="h-6 w-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-medium">
-                      3
-                    </div>
-                    <h4 className="font-semibold">Create OAuth 2.0 Credentials</h4>
-                  </div>
-                  <Card className="bg-muted/50">
-                    <CardContent className="pt-6">
-                      <h5 className="font-medium mb-2">Instructions:</h5>
-                      <ol className="text-sm space-y-1 text-muted-foreground list-decimal list-inside">
-                        <li>Go to APIs & Services → Credentials</li>
-                        <li>Click "Create Credentials" → "OAuth 2.0 Client IDs"</li>
-                        <li>Choose "Desktop application" as the application type</li>
-                        <li>Give it a name (e.g., "Gmail MCP Client")</li>
-                        <li>Click "Create"</li>
-                        <li>Download the JSON file</li>
-                      </ol>
-                    </CardContent>
-                  </Card>
-                  <Button variant="outline" asChild>
-                    <a
-                      href="https://console.cloud.google.com/apis/credentials"
-                      target="_blank"
-                      className="inline-flex items-center gap-2"
-                    >
-                      <ExternalLink className="h-4 w-4" />
-                      Go to Credentials page
-                    </a>
-                  </Button>
-                </div>
-              )}
-
-              {setupStep === 4 && (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2">
-                    <div className="h-6 w-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-medium">
-                      4
-                    </div>
-                    <h4 className="font-semibold">Save OAuth Credentials</h4>
-                  </div>
-                  <Card className="bg-muted/50">
-                    <CardContent className="pt-6">
-                      <h5 className="font-medium mb-2">Instructions:</h5>
-                      <ol className="text-sm space-y-1 text-muted-foreground list-decimal list-inside">
-                        <li>Rename the downloaded file to "gcp-oauth.keys.json"</li>
-                        <li>Create directory: ~/.gmail-mcp</li>
-                        <li>Move the file to: ~/.gmail-mcp/gcp-oauth.keys.json</li>
-                        <li>Run authentication: npx @gongrzhe/server-gmail-autoauth-mcp auth</li>
-                      </ol>
-                    </CardContent>
-                  </Card>
-                  <Card className="bg-slate-950 text-slate-50">
-                    <CardContent className="pt-6">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-sm font-medium">Terminal Commands</span>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-slate-50 hover:bg-slate-800"
-                          onClick={() =>
-                            navigator.clipboard?.writeText(
-                              "mkdir -p ~/.gmail-mcp\nmv ~/Downloads/gcp-oauth.keys.json ~/.gmail-mcp/\nnpx @gongrzhe/server-gmail-autoauth-mcp auth"
-                            )
-                          }
-                        >
-                          <Copy className="h-3 w-3" />
-                        </Button>
-                      </div>
-                      <div className="font-mono text-sm space-y-1">
-                        <div>mkdir -p ~/.gmail-mcp</div>
-                        <div>mv ~/Downloads/gcp-oauth.keys.json ~/.gmail-mcp/</div>
-                        <div>npx @gongrzhe/server-gmail-autoauth-mcp auth</div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-              )}
+              <p className="text-sm text-muted-foreground">
+                Click the button below to start the Gmail authentication process.
+                This will open your browser where you can authorize access to your Gmail account.
+              </p>
+              <Card className="bg-muted/50">
+                <CardContent className="pt-6">
+                  <h5 className="font-medium mb-2">Instructions:</h5>
+                  <ol className="text-sm space-y-1 text-muted-foreground list-decimal list-inside">
+                    <li>Click "Start Authentication" below</li>
+                    <li>Your browser will open to Google's authorization page</li>
+                    <li>Sign in with your Google account</li>
+                    <li>Grant permission to access your Gmail</li>
+                    <li>You'll be redirected back to the app automatically</li>
+                    <li>Your tokens will be saved and the MCP server will be configured</li>
+                  </ol>
+                </CardContent>
+              </Card>
             </div>
-
-            <div className="flex justify-between">
-              <div>
-                {setupStep > 1 && (
-                  <Button variant="outline" onClick={handlePrevStep} className="flex items-center gap-2">
-                    <ChevronLeft className="h-4 w-4" />
-                    Previous
-                  </Button>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setShowGmailSetup(false)}>
-                  Cancel
-                </Button>
-                <Button onClick={handleNextStep} className="flex items-center gap-2">
-                  {setupStep === 4 ? (
-                    <>
-                      <CheckCircle className="h-4 w-4" />
-                      Complete Setup
-                    </>
-                  ) : (
-                    <>
-                      Next
-                      <ChevronRight className="h-4 w-4" />
-                    </>
-                  )}
-                </Button>
-              </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowGmailSetup(false)}>
+                Cancel
+              </Button>
+              <Button onClick={setupGmailServer} className="flex items-center gap-2">
+                <CheckCircle className="h-4 w-4" />
+                Start Authentication
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -520,7 +425,7 @@ export function MCPCatalog({
             <Collapsible
               className="w-full"
               open={activeSection === "import"}
-              onOpenChange={(open) => setActiveSection(open ? "import" : "none")}
+              onOpenChange={(open: boolean) => setActiveSection(open ? "import" : "none")}
             >
               <CollapsibleTrigger asChild>
                 <Button variant="outline" className="flex items-center gap-2 w-full">
@@ -564,7 +469,7 @@ export function MCPCatalog({
 
             <Collapsible
               open={activeSection === "add"}
-              onOpenChange={(open) => setActiveSection(open ? "add" : "none")}
+              onOpenChange={(open: boolean) => setActiveSection(open ? "add" : "none")}
               className="w-full"
             >
               <CollapsibleTrigger asChild>
