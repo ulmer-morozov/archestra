@@ -35,6 +35,24 @@ export interface BrowserTokenResponse {
 }
 
 /**
+ * Context for token extraction from browser windows
+ */
+export interface TokenExtractionContext {
+  url: string;
+  workspaceId: string | null;
+  provider: string;
+}
+
+/**
+ * Extended browser window with context for token extraction
+ */
+export interface BrowserWindowWithContext {
+  webContents: Electron.WebContents;
+  session: Electron.Session;
+  context: TokenExtractionContext;
+}
+
+/**
  * OAuth provider definition with extensible token handling
  */
 export interface OAuthProviderDefinition {
@@ -146,7 +164,7 @@ export interface OAuthProviderDefinition {
      * This function runs in the main process and can access window.webContents.
      * Should return BrowserTokenResponse or null if tokens not available.
      */
-    extractTokens: (window: any) => Promise<BrowserTokenResponse | null>;
+    extractTokens: (window: BrowserWindowWithContext) => Promise<BrowserTokenResponse | null>;
     /**
      * Environment variable mapping for browser tokens.
      * Maps BrowserTokenResponse fields to environment variables.

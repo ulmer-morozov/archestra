@@ -7,7 +7,7 @@ import { BrowserWindow } from 'electron';
 
 import log from '@backend/utils/logger';
 
-import { BrowserTokenResponse, OAuthProviderDefinition } from '../provider-interface';
+import { BrowserTokenResponse, OAuthProviderDefinition, TokenExtractionContext } from '../provider-interface';
 
 /**
  * Token extraction handler configuration
@@ -37,7 +37,7 @@ export function setupTokenExtractionHandlers(config: TokenExtractionConfig): voi
     log.info(`[Browser Auth - ${provider.name}] ${eventType}:`, url);
 
     try {
-      const extractionContext = {
+      const extractionContext: TokenExtractionContext = {
         url,
         workspaceId: getWorkspaceId(),
         provider: provider.name,

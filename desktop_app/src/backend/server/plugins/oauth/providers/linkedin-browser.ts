@@ -43,7 +43,7 @@ export const linkedinBrowserProvider: OAuthProviderDefinition = {
       }
     },
 
-    extractTokens: async (windowWithContext: any) => {
+    extractTokens: async (windowWithContext) => {
       // Extract the actual window parts and context
       const { webContents, session, context } = windowWithContext;
       const url = webContents.getURL();
