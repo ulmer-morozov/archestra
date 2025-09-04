@@ -94,3 +94,21 @@ export const BROWSER_AUTH_WINDOW_CONFIG = {
 export function getProviderSessionPartition(providerName: string): string {
   return `persist:${providerName}-auth`;
 }
+
+/**
+ * Function that checks if a URL is allowed based on its domain
+ */
+export function requireDomainOrSubdomain(domain: string): (url: string) => boolean {
+  return (url: string): boolean => {
+    // Only allow navigation to official Slack domains
+    try {
+      const parsedUrl = new URL(url);
+      // Allow "example.com", and "*.example.com"
+      const hostname = parsedUrl.hostname;
+      return hostname === domain || (hostname.endsWith(`.${domain}`) && hostname.length > `.${domain}`.length);
+    } catch (e) {
+      // If URL parsing fails, deny navigation
+      return false;
+    }
+  };
+}

@@ -1,4 +1,5 @@
 import { OAuthProviderDefinition } from '../provider-interface';
+import { requireDomainOrSubdomain } from '../utils/browser-auth-utils';
 import {
   buildLinkedInTokenExtractionScript,
   isLinkedInAuthenticatedPage,
@@ -27,21 +28,7 @@ export const linkedinBrowserProvider: OAuthProviderDefinition = {
       primary: 'LINKEDIN_COOKIE', // Changed to match what the container expects
     },
 
-    navigationRules: (url: string) => {
-      // Only allow navigation to official LinkedIn domains
-      try {
-        const parsedUrl = new URL(url);
-        const hostname = parsedUrl.hostname;
-        return (
-          hostname === 'linkedin.com' ||
-          hostname === 'www.linkedin.com' ||
-          (hostname.endsWith('.linkedin.com') && hostname.length > '.linkedin.com'.length)
-        );
-      } catch (e) {
-        // If URL parsing fails, deny navigation
-        return false;
-      }
-    },
+    navigationRules: requireDomainOrSubdomain('linkedin.com'),
 
     extractTokens: async (windowWithContext) => {
       // Extract the actual window parts and context

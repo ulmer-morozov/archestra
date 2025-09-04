@@ -1,4 +1,5 @@
 import { OAuthProviderDefinition } from '../provider-interface';
+import { requireDomainOrSubdomain } from '../utils/browser-auth-utils';
 import { buildSlackTokenExtractionScript, isSlackWorkspacePage } from '../utils/slack-token-extractor';
 
 export const slackBrowserProvider: OAuthProviderDefinition = {
@@ -25,22 +26,7 @@ export const slackBrowserProvider: OAuthProviderDefinition = {
       secondary: 'SLACK_MCP_XOXD_TOKEN',
     },
 
-    navigationRules: (url: string) => {
-      // Only allow navigation to official Slack domains
-      try {
-        const parsedUrl = new URL(url);
-        // Allow "slack.com", "app.slack.com", and "*.slack.com"
-        const hostname = parsedUrl.hostname;
-        return (
-          hostname === 'slack.com' ||
-          hostname === 'app.slack.com' ||
-          (hostname.endsWith('.slack.com') && hostname.length > '.slack.com'.length)
-        );
-      } catch (e) {
-        // If URL parsing fails, deny navigation
-        return false;
-      }
-    },
+    navigationRules: requireDomainOrSubdomain('slack.com'),
 
     extractTokens: async (windowWithContext) => {
       // Extract the actual window parts and context
