@@ -14,6 +14,7 @@ export {
   slackProvider,
   slackBrowserProvider,
   linkedinBrowserProvider,
+  jiraBrowserProvider
 } from './provider-registry';
 
 /**

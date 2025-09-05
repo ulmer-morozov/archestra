@@ -1,5 +1,6 @@
 import { OAuthProviderDefinition, OAuthProviderRegistry } from './provider-interface';
 import { googleProvider } from './providers/google';
+import { jiraBrowserProvider } from './providers/jira-browser';
 import { linkedinBrowserProvider } from './providers/linkedin-browser';
 import { slackProvider } from './providers/slack';
 import { slackBrowserProvider } from './providers/slack-browser';
@@ -17,6 +18,7 @@ export const oauthProviders: OAuthProviderRegistry = {
   slack: slackProvider,
   'slack-browser': slackBrowserProvider,
   'linkedin-browser': linkedinBrowserProvider,
+  'jira-browser': jiraBrowserProvider,
 };
 
 /**
@@ -45,4 +47,4 @@ export function getOAuthProviderNames(): string[] {
 }
 
 // Re-export individual providers for direct access if needed
-export { googleProvider, slackProvider, slackBrowserProvider, linkedinBrowserProvider };
+export { googleProvider, jiraBrowserProvider, linkedinBrowserProvider, slackBrowserProvider, slackProvider };
