@@ -62,7 +62,7 @@ export const jiraBrowserProvider: OAuthProviderDefinition = {
       // We need manage tokens page
       if (!isAtlassianTokensPage(url)) {
         console.log(`[Jira Browser Auth] Not on tokens page, waiting for user to navigate ${new URL(url).pathname}`);
-        webContents.loadURL('https://id.atlassian.com/manage-profile/security/api-tokens');
+        await webContents.loadURL('https://id.atlassian.com/manage-profile/security/api-tokens');
 
         return null;
       }

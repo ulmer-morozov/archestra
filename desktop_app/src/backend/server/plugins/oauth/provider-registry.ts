@@ -47,4 +47,4 @@ export function getOAuthProviderNames(): string[] {
 }
 
 // Re-export individual providers for direct access if needed
-export { googleProvider, jiraBrowserProvider, linkedinBrowserProvider, slackBrowserProvider, slackProvider };
+export { googleProvider, slackProvider, slackBrowserProvider, linkedinBrowserProvider, jiraBrowserProvider };
