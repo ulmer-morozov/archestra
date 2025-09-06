@@ -108,7 +108,7 @@ function hostIsDomainOrSubdomain(expectedDomain: string, actualHost: string): bo
  */
 export function requireDomainOrSubdomain(domain: string): (url: string) => boolean {
   return (url: string): boolean => {
-    // Only allow navigation to official Slack domains
+    // Only allow navigation to main domain or its subdomains
     try {
       const parsedUrl = new URL(url);
       // Allow "example.com", and "*.example.com"
