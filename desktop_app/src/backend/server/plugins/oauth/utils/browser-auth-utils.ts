@@ -95,6 +95,14 @@ export function getProviderSessionPartition(providerName: string): string {
   return `persist:${providerName}-auth`;
 }
 
+/** Check if full host is on expected domain on is a subdomain of that domain */
+function hostIsDomainOrSubdomain(expectedDomain: string, actualHost: string): boolean {
+  return (
+    actualHost === expectedDomain ||
+    (actualHost.endsWith(`.${expectedDomain}`) && actualHost.length > `.${expectedDomain}`.length)
+  );
+}
+
 /**
  * Function that checks if a URL is allowed based on its domain
  */
@@ -104,8 +112,7 @@ export function requireDomainOrSubdomain(domain: string): (url: string) => boole
     try {
       const parsedUrl = new URL(url);
       // Allow "example.com", and "*.example.com"
-      const hostname = parsedUrl.hostname;
-      return hostname === domain || (hostname.endsWith(`.${domain}`) && hostname.length > `.${domain}`.length);
+      return hostIsDomainOrSubdomain(domain, parsedUrl.hostname);
     } catch (e) {
       // If URL parsing fails, deny navigation
       return false;
@@ -123,7 +130,7 @@ export function urlMatchesPage(url: string, domain: string, ...pageNames: string
   try {
     const parsedUrl = new URL(url);
     return (
-      parsedUrl.hostname.includes(domain) &&
+      hostIsDomainOrSubdomain(domain, parsedUrl.hostname) &&
       pageNames.some((page) => (page === '/' ? parsedUrl.pathname === '/' : parsedUrl.pathname.startsWith(page)))
     );
   } catch {
@@ -137,21 +144,21 @@ export function urlMatchesPage(url: string, domain: string, ...pageNames: string
 export function isOnPage(url: string, domain: string, pageName: string): boolean {
   try {
     const parsedUrl = new URL(url);
-    return parsedUrl.hostname.includes(domain) && pageName === parsedUrl.pathname;
+    return hostIsDomainOrSubdomain(domain, parsedUrl.hostname) && pageName === parsedUrl.pathname;
   } catch {
     return false;
   }
 }
 
 /**
- * Sleep. For asynchroniuous tasks
+ * Wait for exact duration in asynchronous tasks
  */
 export function sleep(duration: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, duration));
 }
 
 /**
- * JS Function that waits for a HTML element
+ * JS Function that waits for a HTML element for a given duration
  */
 const WAIT_FOR_ELEMENT_FUNCTION = (durationMs: number) => `
 function waitForElement(TConstructor, selector, root = document.body) {
@@ -252,18 +259,18 @@ export function clickOnElement(wc: WebContents, selector: string) {
 /**
  * Wait for an HTMLInputElement in Electron Window and get value from it
  */
-export function getValueFromInput(wc: WebContents, selector: string): Promise<string> {
+export function getValueFromInput(wc: WebContents, selector: string): Promise<{ error?: string; value: string }> {
   console.log('[Browser Auth] Getting value from input:', selector);
   return wc.executeJavaScript(`
    (async function () {
     ${WAIT_FOR_ELEMENT_FUNCTION(30_000)}
     try {
       const element = await waitForElement(HTMLInputElement, ${JSON.stringify(selector)});
-      return element.value;
+      return {value: element.value};
     }
     catch (e) {
         console.error("Error getting value for element", e);
-        return '';
+        return {error: e.message, value: ''};
     }
 })();
   `);

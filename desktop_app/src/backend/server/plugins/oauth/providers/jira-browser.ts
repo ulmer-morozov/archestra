@@ -90,7 +90,10 @@ export const jiraBrowserProvider: OAuthProviderDefinition = {
       await clickOnElement(webContents, `${MODAL_SELECTOR} button[data-testid="toggleButton"]`);
 
       // get generated token from input
-      const token = await getValueFromInput(webContents, `${MODAL_SELECTOR} input#apiTokenField`);
+      const { value: token, error: browserError } = await getValueFromInput(
+        webContents,
+        `${MODAL_SELECTOR} input#apiTokenField`
+      );
 
       let success = token.length > 0;
 
@@ -107,7 +110,7 @@ export const jiraBrowserProvider: OAuthProviderDefinition = {
         };
       }
 
-      const error = 'Token is empty. Could not generate token';
+      const error = browserError || 'Token is empty. Could not generate token';
 
       console.log('[LinkedIn Browser Auth] Page verification result:', {
         success,
