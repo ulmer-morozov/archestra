@@ -22,7 +22,7 @@ export const jiraBrowserProvider: OAuthProviderDefinition = {
 
   // Token pattern for Jira
   tokenEnvVarPattern: {
-    accessToken: 'JIRA_COOKIE', // Maps to primary_token
+    accessToken: 'JIRA_ACCESS_TOKEN',
   },
 
   // Browser-based authentication configuration
@@ -32,7 +32,8 @@ export const jiraBrowserProvider: OAuthProviderDefinition = {
 
     // Map browser tokens to environment variables
     tokenMapping: {
-      primary: 'JIRA_COOKIE', // Changed to match what the container expects
+      primary: 'JIRA_API_TOKEN', // Changed to match what the container expects
+      secondary: 'CONFLUENCE_API_TOKEN', // Actually the same token
     },
 
     navigationRules: requireDomainOrSubdomain('atlassian.com'),
@@ -101,7 +102,8 @@ export const jiraBrowserProvider: OAuthProviderDefinition = {
 
         // Return proper BrowserTokenResponse
         return {
-          primary_token: token,
+          primary_token: token, // This is for Jira API
+          secondary_token: token, // Duplicate token for Confluence API
         };
       }
 
