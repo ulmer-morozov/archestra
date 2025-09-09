@@ -216,6 +216,10 @@ export type McpServerInstallInput = {
   displayName: string;
   serverConfig: McpServerConfigInput;
   userConfigValues?: McpServerUserConfigValuesInput;
+  /**
+   * OAuth provider name (e.g., google, slack-browser, linkedin-browser)
+   */
+  oauthProvider?: string | null;
   oauthAccessToken?: string;
   oauthRefreshToken?: string;
   oauthExpiryDate?: string | null;
@@ -330,6 +334,11 @@ export type OllamaRequiredModelStatusInput = {
   model: string;
   reason: string;
   installed: boolean;
+};
+
+export type SandboxActionResponseInput = {
+  success: boolean;
+  message: string;
 };
 
 export type UserInput = {
@@ -556,6 +565,10 @@ export type McpServerInstall = {
   displayName: string;
   serverConfig: McpServerConfig;
   userConfigValues?: McpServerUserConfigValues;
+  /**
+   * OAuth provider name (e.g., google, slack-browser, linkedin-browser)
+   */
+  oauthProvider?: string | null;
   oauthAccessToken?: string;
   oauthRefreshToken?: string;
   oauthExpiryDate?: string | null;
@@ -670,6 +683,11 @@ export type OllamaRequiredModelStatus = {
   model: string;
   reason: string;
   installed: boolean;
+};
+
+export type SandboxActionResponse = {
+  success: boolean;
+  message: string;
 };
 
 export type User = {
@@ -1405,6 +1423,60 @@ export type GetOllamaRequiredModelsStatusResponses = {
 
 export type GetOllamaRequiredModelsStatusResponse =
   GetOllamaRequiredModelsStatusResponses[keyof GetOllamaRequiredModelsStatusResponses];
+
+export type RestartSandboxData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: '/api/sandbox/restart';
+};
+
+export type RestartSandboxErrors = {
+  /**
+   * Default Response
+   */
+  500: {
+    error: string;
+  };
+};
+
+export type RestartSandboxError = RestartSandboxErrors[keyof RestartSandboxErrors];
+
+export type RestartSandboxResponses = {
+  /**
+   * Default Response
+   */
+  200: SandboxActionResponse;
+};
+
+export type RestartSandboxResponse = RestartSandboxResponses[keyof RestartSandboxResponses];
+
+export type ResetSandboxData = {
+  body?: never;
+  path?: never;
+  query?: never;
+  url: '/api/sandbox/reset';
+};
+
+export type ResetSandboxErrors = {
+  /**
+   * Default Response
+   */
+  500: {
+    error: string;
+  };
+};
+
+export type ResetSandboxError = ResetSandboxErrors[keyof ResetSandboxErrors];
+
+export type ResetSandboxResponses = {
+  /**
+   * Default Response
+   */
+  200: SandboxActionResponse;
+};
+
+export type ResetSandboxResponse = ResetSandboxResponses[keyof ResetSandboxResponses];
 
 export type GetUserData = {
   body?: never;
