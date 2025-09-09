@@ -2,16 +2,15 @@ import { OAuthProviderDefinition } from '../provider-interface';
 import {
   clickOnElement,
   focusOnElement,
+  getDataAttributeValueFromElement,
+  getPropertyFromElement,
   getValueFromInput,
+  isOnPage,
   requireDomainOrSubdomain,
   sleep,
   typeText,
 } from '../utils/browser-auth-utils';
-import {
-  isAtlassianAuthenticatedPage,
-  isAtlassianInLoginPage,
-  isAtlassianTokensPage,
-} from '../utils/jira-token-extractor';
+import { isAtlassianAuthenticatedPage, isAtlassianInLoginPage } from '../utils/jira-token-extractor';
 
 export const jiraBrowserProvider: OAuthProviderDefinition = {
   name: 'jira-browser',
@@ -60,60 +59,124 @@ export const jiraBrowserProvider: OAuthProviderDefinition = {
       }
 
       // We need manage tokens page
-      if (!isAtlassianTokensPage(url)) {
-        console.log(`[Jira Browser Auth] Not on tokens page, waiting for user to navigate ${new URL(url).pathname}`);
+      if (!isOnPage(url, 'id.atlassian.com', '/manage-profile/security/api-tokens')) {
+        console.log(`[Jira Browser Auth] Not on tokens page ${new URL(url).pathname}. Redirecting...`);
         await webContents.loadURL('https://id.atlassian.com/manage-profile/security/api-tokens');
 
         return null;
       }
 
+      await sleep(5000);
+
+      // Get user email from profile button
+      const userEmail = (
+        await getPropertyFromElement(
+          webContents,
+          "[data-testid='HorizontalNavTopNavigation-secondary-actions'] div:nth-child(2) button",
+          'ariaLabel'
+        )
+      ).orThrow('[Jira Browser Auth] Could not get user email from profile button');
+
+      console.log(`[Jira Browser Auth] Logged in as user: ${userEmail}`);
+
+      const SHOW_APP_BUTTON_SELECTOR = '[data-testid="HorizontalNavTopNavigation-header"] button';
+
+      // open dropdown menu to show available products
+      (await clickOnElement(webContents, SHOW_APP_BUTTON_SELECTOR)).orThrow(
+        '[Jira Browser Auth] Could not click on show Apps button'
+      );
+
+      // duration of waitig for products to appear in menu
+      const PRODUCT_WAIT_DELAY = 2000;
+
+      const jiraAttributeValue = await getDataAttributeValueFromElement(
+        webContents,
+        'a[data-testid^="switcher-item__JIRA_SOFTWARE"]',
+        'testid',
+        PRODUCT_WAIT_DELAY
+      );
+
+      const jiraServerPrefix = jiraAttributeValue.isSuccessfull
+        ? jiraAttributeValue.data.substring('switcher-item__JIRA_SOFTWARE'.length)
+        : '';
+
+      const confluenceAttributeValue = await getDataAttributeValueFromElement(
+        webContents,
+        'a[data-testid^="switcher-item__CONFLUENCE"]',
+        'testid',
+        PRODUCT_WAIT_DELAY
+      );
+
+      const confluenceServerPrefix = confluenceAttributeValue.isSuccessfull
+        ? confluenceAttributeValue.data.substring('switcher-item__CONFLUENCE'.length)
+        : '';
+
+      console.log(`[Jira Browser Auth] Jira server prefix found: ${jiraServerPrefix}`);
+      console.log(`[Jira Browser Auth] Confluence server prefix found: ${confluenceServerPrefix}`);
+
+      if (jiraServerPrefix && confluenceServerPrefix) {
+        webContents.executeJavaScript(
+          `alert("Both Jira and Confluence products are not activated for Atlassian account with email: ${userEmail}. At least one product is required.")`
+        );
+      }
+
+      (await clickOnElement(webContents, SHOW_APP_BUTTON_SELECTOR)).orThrow(
+        '[Jira Browser Auth] Could not click on show Apps button'
+      );
+
       console.log('[Jira Browser Auth] On token managment page, getting token...');
 
       // click on generate token button
-      await clickOnElement(webContents, "button[data-testid='createApiToken-header']");
+      (await clickOnElement(webContents, "button[data-testid='createApiToken-header']")).orThrow(
+        '[Jira Browser Auth] Create new token button not found'
+      );
 
       // selector for main modal element
       const MODAL_SELECTOR = 'section[data-testid="api-token-creation-modal"]';
 
       // focus on token input name field
-      await focusOnElement(webContents, `${MODAL_SELECTOR} input[name="tokenName"]`);
+      (await focusOnElement(webContents, `${MODAL_SELECTOR} input[name="tokenName"]`)).orThrow(
+        '[Jira Browser Auth] Focus on input token name filed has failed'
+      );
+
       // simulate keyboard events
       await typeText(webContents, `ArchestraAI_MCP_${Date.now()}`);
 
       // click on submit button to send form
-      await clickOnElement(webContents, `${MODAL_SELECTOR} button[type="submit"]`);
+      (await clickOnElement(webContents, `${MODAL_SELECTOR} button[type="submit"]`)).orThrow(
+        '[Jira Browser Auth] Submiting new token failed'
+      );
 
       // wait a bit for the token
       await sleep(3000);
 
       // click on token visibility button to show it
-      await clickOnElement(webContents, `${MODAL_SELECTOR} button[data-testid="toggleButton"]`);
-
-      // get generated token from input
-      const { value: token, error: browserError } = await getValueFromInput(
-        webContents,
-        `${MODAL_SELECTOR} input#apiTokenField`
+      (await clickOnElement(webContents, `${MODAL_SELECTOR} button[data-testid="toggleButton"]`)).orThrow(
+        '[Jira Browser Auth] Toggling visibility of a generated token failed'
       );
 
-      let success = token.length > 0;
+      // get generated token from input
+      const tokenResult = await getValueFromInput(webContents, `${MODAL_SELECTOR} input#apiTokenField`);
 
-      if (success) {
+      if (tokenResult.isSuccessfull && tokenResult.data.length > 0) {
         // Log success
         console.log('[LinkedIn Browser Auth] Page verification result:', {
-          success,
+          success: true,
         });
 
         // Return proper BrowserTokenResponse
         return {
-          primary_token: token, // This is for Jira API
-          secondary_token: token, // Duplicate token for Confluence API
+          primary_token: tokenResult.data, // This is for Jira API
+          secondary_token: tokenResult.data, // Duplicate token for Confluence API
+          jira_server_url: `https://${jiraServerPrefix}.atlassian.com`, // User's Jira Server URL
+          confluence_server_url: `https://${confluenceServerPrefix}.atlassian.com`, // User's Confluence Server URL
         };
       }
 
-      const error = browserError || 'Token is empty. Could not generate token';
+      const error = tokenResult.isSuccessfull ? 'Token is empty. Could not generate token' : tokenResult.error;
 
       console.log('[LinkedIn Browser Auth] Page verification result:', {
-        success,
+        success: false,
         error,
       });
 

@@ -1,4 +1,4 @@
-import { isOnPage, urlMatchesPage } from './browser-auth-utils';
+import { urlMatchesPage } from './browser-auth-utils';
 
 /**
  * Utilities for extracting Jira authentication tokens from the browser
@@ -16,11 +16,4 @@ export function isAtlassianInLoginPage(url: string): boolean {
  */
 export function isAtlassianAuthenticatedPage(url: string): boolean {
   return urlMatchesPage(url, 'id.atlassian.com', '/manage-profile') || urlMatchesPage(url, 'home.atlassian.com');
-}
-
-/**
- * Check if URL is Atlassian tokens page
- */
-export function isAtlassianTokensPage(url: string): boolean {
-  return isOnPage(url, 'id.atlassian.com', '/manage-profile/security/api-tokens');
 }

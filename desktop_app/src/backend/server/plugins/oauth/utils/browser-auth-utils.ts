@@ -64,7 +64,7 @@ export function setupTokenExtractionHandlers(config: TokenExtractionConfig): voi
   window.webContents.on('did-finish-load', () => attemptTokenExtraction('page load'));
 
   // Also listen for navigation within the same page (SPA navigation)
-  window.webContents.on('did-navigate-in-page', () => attemptTokenExtraction('in-page navigation'));
+  // window.webContents.on('did-navigate-in-page', () => attemptTokenExtraction('in-page navigation'));
 }
 
 /**
@@ -141,13 +141,54 @@ export function urlMatchesPage(url: string, domain: string, ...pageNames: string
 /**
  * Check if URL is exact pagee on exact domain
  */
-export function isOnPage(url: string, domain: string, pageName: string): boolean {
+export function isOnPage(url: string, domain: string, pageName: string = '/'): boolean {
   try {
     const parsedUrl = new URL(url);
     return hostIsDomainOrSubdomain(domain, parsedUrl.hostname) && pageName === parsedUrl.pathname;
   } catch {
     return false;
   }
+}
+
+abstract class ResultBase {
+  public abstract readonly isSuccessfull: boolean;
+  public abstract orThrow(additionalText?: string): unknown;
+}
+
+class Failure extends ResultBase {
+  public readonly isSuccessfull = false;
+
+  constructor(public readonly error: string) {
+    super();
+  }
+
+  public orThrow(additionalText?: string): never {
+    throw new Error(`${additionalText}. ${this.error}`);
+  }
+}
+
+class Success<T> extends ResultBase {
+  public readonly isSuccessfull = true;
+
+  constructor(public readonly data: T) {
+    super();
+  }
+
+  public orThrow(): T {
+    return this.data;
+  }
+}
+
+type Result<T = unknown> = Failure | Success<T>;
+
+function failure(error: string): Failure {
+  return new Failure(error);
+}
+
+function success(): Result;
+function success<T>(data: T): Result<T>;
+function success<T>(data?: T): Result | Result<T> {
+  return new Success(data);
 }
 
 /**
@@ -157,11 +198,24 @@ export function sleep(duration: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, duration));
 }
 
+async function executeJavaScript<T = void>(wc: WebContents, script: string): Promise<Result<T>> {
+  try {
+    const data = await wc.executeJavaScript(script, true);
+    return success(data);
+  } catch (e) {
+    return failure(`Error executing script: ${e.message}`);
+  }
+}
+
+async function executeIsolatedJavaScript<T = void>(wc: WebContents, script: string): Promise<Result<T>> {
+  return executeJavaScript(wc, `(async function () { ${script} })()`);
+}
+
 /**
  * JS Function that waits for a HTML element for a given duration
  */
-const WAIT_FOR_ELEMENT_FUNCTION = (durationMs: number) => `
-function waitForElement(TConstructor, selector, root = document.body) {
+const WAIT_FOR_ELEMENT_FUNCTION_DECLARATION = `
+function waitForElement(TConstructor, selector, root = document.body, durationMs = 30000) {
         return new Promise((resolve, reject) => {
             const element = root.querySelector(selector);
             if (element !== null && !(element instanceof TConstructor)) {
@@ -185,7 +239,7 @@ function waitForElement(TConstructor, selector, root = document.body) {
             timeoutId = setTimeout(() => {
                 observer.disconnect();
                 reject(new Error("Element not found:" + selector));
-            }, ${durationMs});
+            }, durationMs);
             observer.observe(root, {
                 childList: true,
                 subtree: true,
@@ -196,84 +250,106 @@ function waitForElement(TConstructor, selector, root = document.body) {
 /**
  * Wait for an element in Electron Window
  */
-export async function waitForElement(wc: WebContents, selector: string) {
+export async function waitForElement(wc: WebContents, selector: string): Promise<Result<void>> {
   console.log('[Browser Auth] Waiting for element:', selector);
 
-  return wc.executeJavaScript(`
-(async function () {
-    ${WAIT_FOR_ELEMENT_FUNCTION(30_000)}
-    try {
-      await waitForElement(HTMLElement, ${JSON.stringify(selector)});
-      return true;
-    }
-    catch (e) {
-        console.error("Error waiting for element", e);
-        return false;
-    }
-})();
-  `);
+  return executeIsolatedJavaScript(
+    wc,
+    `
+    ${WAIT_FOR_ELEMENT_FUNCTION_DECLARATION}
+    await waitForElement(HTMLElement, ${JSON.stringify(selector)});
+    `
+  );
 }
 
 /**
  * Wait for an element in Electron Window and focus on it
  */
-export function focusOnElement(wc: WebContents, selector: string) {
+export function focusOnElement(wc: WebContents, selector: string): Promise<Result<void>> {
   console.log('[Browser Auth] Focusing on element:', selector);
-  return wc.executeJavaScript(`
-(async function () {
-    ${WAIT_FOR_ELEMENT_FUNCTION(30_000)}
-    try {
-      const element = await waitForElement(HTMLElement, ${JSON.stringify(selector)});
-      element.focus();
-      return true;
-    }
-    catch (e) {
-        console.error("Error focusing on element", e);
-        return false;
-    }
-})();
-  `);
+  return executeIsolatedJavaScript(
+    wc,
+    `
+    ${WAIT_FOR_ELEMENT_FUNCTION_DECLARATION}
+    const element = await waitForElement(HTMLElement, ${JSON.stringify(selector)});
+    element.focus();
+    `
+  );
 }
 
 /**
  * Wait for an element in Electron Window and click on it
  */
-export function clickOnElement(wc: WebContents, selector: string) {
+export function clickOnElement(wc: WebContents, selector: string): Promise<Result<void>> {
   console.log('[Browser Auth] Clicking on element:', selector);
-  return wc.executeJavaScript(`
-   (async function () {
-    ${WAIT_FOR_ELEMENT_FUNCTION(30_000)}
-    try {
-      const element = await waitForElement(HTMLElement, ${JSON.stringify(selector)});
-      element.click();
-      return true;
-    }
-    catch (e) {
-        console.error("Error clicking on element", e);
-        return false;
-    }
-})();
-  `);
+  return executeIsolatedJavaScript(
+    wc,
+    `
+    ${WAIT_FOR_ELEMENT_FUNCTION_DECLARATION}
+    const element = await waitForElement(HTMLElement, ${JSON.stringify(selector)});
+    element.click();
+    `
+  );
 }
 
 /**
  * Wait for an HTMLInputElement in Electron Window and get value from it
  */
-export function getValueFromInput(wc: WebContents, selector: string): Promise<{ error?: string; value: string }> {
+export function getValueFromInput(wc: WebContents, selector: string): Promise<Result<string>> {
   console.log('[Browser Auth] Getting value from input:', selector);
-  return wc.executeJavaScript(`
-   (async function () {
-    ${WAIT_FOR_ELEMENT_FUNCTION(30_000)}
-    try {
-      const element = await waitForElement(HTMLInputElement, ${JSON.stringify(selector)});
-      return {value: element.value};
+  return executeIsolatedJavaScript(
+    wc,
+    `
+    ${WAIT_FOR_ELEMENT_FUNCTION_DECLARATION}
+    const element = await waitForElement(HTMLInputElement, ${JSON.stringify(selector)});
+    return element.value;
+    `
+  );
+}
+
+/**
+ * Wait for an HTMLElement in Electron Window and get value from specified property
+ */
+export function getPropertyFromElement<T = string>(
+  wc: WebContents,
+  selector: string,
+  propertyName: string
+): Promise<Result<T>> {
+  console.log('[Browser Auth] Getting property from element:', selector);
+  return executeIsolatedJavaScript(
+    wc,
+    `
+    ${WAIT_FOR_ELEMENT_FUNCTION_DECLARATION}
+    const element = await waitForElement(HTMLElement, ${JSON.stringify(selector)});
+    const propertyName = ${JSON.stringify(propertyName)};
+
+    if(!(propertyName in element)) {
+      throw new Error("Property " + propertyName + " does not exist on element");
     }
-    catch (e) {
-        console.error("Error getting value for element", e);
-        return {error: e.message, value: ''};
-    }
-})();
-  `);
+
+    return element[propertyName];
+    `
+  );
+}
+
+/**
+ * Wait for an HTMLElement in Electron Window and get value from specified property
+ */
+export function getDataAttributeValueFromElement(
+  wc: WebContents,
+  selector: string,
+  attributeName: string,
+  waitDuration: number = 30_000
+): Promise<Result<string>> {
+  console.log('[Browser Auth] Getting data attribute from element:', selector);
+  return executeIsolatedJavaScript(
+    wc,
+    `
+    ${WAIT_FOR_ELEMENT_FUNCTION_DECLARATION}
+    const element = await waitForElement(HTMLElement, ${JSON.stringify(selector)}, document.body, ${waitDuration});
+    return element.dataset[${JSON.stringify(attributeName)}];
+  `
+  );
 }
 
 /**
